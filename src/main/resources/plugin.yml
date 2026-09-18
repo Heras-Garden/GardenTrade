@@ -1,0 +1,33 @@
+name: GardenTrade
+version: '${project.version}'
+main: com.herasgarden.gardentrade.GardenTrade
+api-version: '26.2'
+author: Hera's Garden
+website: https://herasgarden.net
+description: Unified Garden storefronts and shop transactions.
+depend: [GardenCore, GardenLands]
+
+commands:
+  shop:
+    description: Create and use Garden shops.
+    usage: /shop <create|companycreate|companylist|governmentcreate|governmentlist|info|buy|delete|list>
+
+permissions:
+  gardentrade.shop:
+    default: true
+  gardentrade.shop.create:
+    default: true
+  gardentrade.shop.company.create:
+    description: Create storefronts owned by Garden companies when the organization role permits it.
+    default: true
+  gardentrade.shop.company.list:
+    description: View Garden company storefronts.
+    default: true
+  gardentrade.shop.government.create:
+    description: Create storefronts owned by Garden governments when the organization role permits it.
+    default: true
+  gardentrade.shop.government.list:
+    description: View Garden government storefronts.
+    default: true
+  gardentrade.shop.admin:
+    default: op

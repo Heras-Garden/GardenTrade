@@ -1,0 +1,4 @@
+shops:
+  max-per-player: 15
+  max-per-organization: 30
+  target-distance: 6
