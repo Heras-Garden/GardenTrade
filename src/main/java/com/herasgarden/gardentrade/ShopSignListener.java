@@ -5,8 +5,6 @@ import com.herasgarden.gardentrade.model.ShopRecord;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
-import org.bukkit.block.data.Directional;
-import org.bukkit.block.sign.Side;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -25,7 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ShopSignListener implements Listener {
-    private static final Pattern BUY_PRICE = Pattern.compile("(?i)(?:^|\\s)B?\\s*(\\d+)(?:\\s*:.*)?$");
+    private static final Pattern PRICE = Pattern.compile("(?i)(?:^|\\s)[BS]?\\s*(\\d+)(?:\\s*:.*)?$");
 
     private final JavaPlugin plugin;
     private final ShopService shops;
@@ -41,20 +39,20 @@ public final class ShopSignListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onCreate(SignChangeEvent event) {
-        Block signBlock = event.getBlock();
-        Block container = attachedSupport(signBlock);
-        if (container == null || !ShopBlockKey.supported(container)) {
-            return;
-        }
-
         String marker = safe(event.getLine(0));
-        if (!marker.equalsIgnoreCase("[signshop]") && !marker.equalsIgnoreCase("[adminshop]")) {
-            return;
-        }
+        boolean sell = marker.equalsIgnoreCase("[signshop]") || marker.equalsIgnoreCase("[adminshop]");
+        boolean buyback = marker.equalsIgnoreCase("[buyshop]") || marker.equalsIgnoreCase("[adminbuy]");
+        if (!sell && !buyback) return;
 
         Player player = event.getPlayer();
-        if (!player.hasPermission("gardentrade.shop.sign")) {
-            GardenMessages.send(player, "Sign shops are reserved for server staff.");
+        boolean unlimited = marker.equalsIgnoreCase("[adminshop]") || marker.equalsIgnoreCase("[adminbuy]");
+        if (unlimited) {
+            if (!player.hasPermission("gardentrade.shop.admin")) {
+                GardenMessages.send(player, "Only administrators can create unlimited sign shops.");
+                return;
+            }
+        } else if (!player.hasPermission("gardentrade.shop.sign")) {
+            GardenMessages.send(player, "You do not have permission to create sign shops.");
             return;
         }
 
@@ -63,7 +61,7 @@ public final class ShopSignListener implements Listener {
         String itemText = safe(event.getLine(3));
         if (quantityText.isBlank() || priceText.isBlank() || itemText.isBlank()) {
             GardenMessages.send(player,
-                    "Sign shops use: line 1 [SignShop], line 2 quantity, line 3 B price, line 4 item.");
+                    "Sign shops use: line 1 [SignShop] or [BuyShop], line 2 quantity, line 3 price, line 4 item.");
             return;
         }
 
@@ -72,28 +70,35 @@ public final class ShopSignListener implements Listener {
         Material material;
         try {
             quantity = Integer.parseInt(quantityText.replace(",", ""));
-            price = parseBuyPrice(priceText);
+            price = parsePrice(priceText);
             material = Material.matchMaterial(itemText.toUpperCase(Locale.ROOT).replace(' ', '_'));
             if (material == null || material.isAir() || !material.isItem()) {
                 throw new NumberFormatException("Invalid shop item");
             }
         } catch (NumberFormatException exception) {
-            GardenMessages.send(player,
-                    "Use a valid quantity, buy price, and Minecraft item name on the sign.");
+            GardenMessages.send(player, "Use a valid quantity, price, and Minecraft item name on the sign.");
             return;
         }
 
         ItemStack template = new ItemStack(material);
         try {
-            ShopRecord shop = shops.create(player, container, template, quantity, price, maxShops);
-            event.setLine(0, "[SignShop]");
+            ShopRecord shop = shops.createSign(
+                    player, event.getBlock(), template, quantity, price, buyback, unlimited, maxShops);
+            event.setLine(0, unlimited
+                    ? (buyback ? "[AdminBuy]" : "[AdminShop]")
+                    : (buyback ? "[BuyShop]" : "[SignShop]"));
             event.setLine(1, Integer.toString(shop.quantity()));
-            event.setLine(2, "B " + shop.price());
+            event.setLine(2, (buyback ? "S " : "B ") + shop.price());
             event.setLine(3, shop.itemLabel());
             plugin.getServer().getScheduler().runTask(plugin, visuals::refresh);
-            GardenMessages.send(player,
-                    "Sign shop created: " + shop.quantity() + " " + shop.itemLabel()
-                            + " for ⟡ " + shop.price() + ".");
+
+            String behavior = buyback ? "buys" : "sells";
+            GardenMessages.send(player, "Sign shop created: " + behavior + " "
+                    + shop.quantity() + " " + shop.itemLabel() + " for ⟡ " + shop.price() + ".");
+            if (!unlimited) {
+                GardenMessages.send(player,
+                        "Look at this sign and use /shop link, then right-click the chest or container that should hold stock.");
+            }
         } catch (IllegalArgumentException exception) {
             GardenMessages.send(player, exception.getMessage());
         } catch (SQLException exception) {
@@ -106,29 +111,19 @@ public final class ShopSignListener implements Listener {
     public void onUse(PlayerInteractEvent event) {
         if ((event.getAction() != Action.RIGHT_CLICK_BLOCK && event.getAction() != Action.LEFT_CLICK_BLOCK)
                 || event.getClickedBlock() == null
-                || !(event.getClickedBlock().getState() instanceof Sign sign)
-                || !isShopSign(sign)) {
-            return;
-        }
-
-        Block container = attachedSupport(event.getClickedBlock());
-        if (container == null || !ShopBlockKey.supported(container)) {
+                || !(event.getClickedBlock().getState() instanceof Sign)) {
             return;
         }
 
         try {
-            Optional<ShopRecord> found = shops.shopAt(container);
-            if (found.isEmpty()) {
-                return;
-            }
+            Optional<ShopRecord> found = shops.shopAt(event.getClickedBlock());
+            if (found.isEmpty() || !found.get().signShop()) return;
+
             event.setCancelled(true);
             ShopRecord shop = found.get();
             Player player = event.getPlayer();
-
             if (event.getAction() == Action.LEFT_CLICK_BLOCK || shops.canManage(player, shop)) {
-                GardenMessages.send(player,
-                        shop.quantity() + " " + shop.itemLabel() + " for ⟡ " + shop.price()
-                                + " per purchase.");
+                GardenMessages.send(player, describe(shop));
                 return;
             }
 
@@ -136,25 +131,18 @@ public final class ShopSignListener implements Listener {
             GardenMessages.send(player, result.message());
             visuals.refresh();
         } catch (SQLException exception) {
+            event.setCancelled(true);
             GardenMessages.send(event.getPlayer(), "The shop system could not update right now.");
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        if (!(event.getBlock().getState() instanceof Sign sign) || !isShopSign(sign)) {
-            return;
-        }
-        Block container = attachedSupport(event.getBlock());
-        if (container == null || !ShopBlockKey.supported(container)) {
-            return;
-        }
+        if (!(event.getBlock().getState() instanceof Sign)) return;
 
         try {
-            Optional<ShopRecord> found = shops.shopAt(container);
-            if (found.isEmpty()) {
-                return;
-            }
+            Optional<ShopRecord> found = shops.shopAt(event.getBlock());
+            if (found.isEmpty() || !found.get().signShop()) return;
             if (!shops.canManage(event.getPlayer(), found.get())) {
                 event.setCancelled(true);
                 GardenMessages.send(event.getPlayer(), "You do not manage this shop.");
@@ -169,31 +157,21 @@ public final class ShopSignListener implements Listener {
         }
     }
 
-    private Block attachedSupport(Block signBlock) {
-        String material = signBlock.getType().name();
-        if (!material.contains("_WALL_") || !material.endsWith("_SIGN")
-                || !(signBlock.getBlockData() instanceof Directional directional)) {
-            return null;
-        }
-        return signBlock.getRelative(directional.getFacing().getOppositeFace());
+    private String describe(ShopRecord shop) {
+        String action = shop.buysFromCustomer() ? "Buys " : "Sells ";
+        String stock = shop.unlimitedStock()
+                ? " | Unlimited stock"
+                : shop.hasStockContainer() ? " | Stock connected" : " | Stock not connected";
+        return action + shop.quantity() + " " + shop.itemLabel() + " for ⟡ "
+                + shop.price() + stock + ".";
     }
 
-    private boolean isShopSign(Sign sign) {
-        String marker = sign.getSide(Side.FRONT).getLine(0);
-        return marker != null && (marker.trim().equalsIgnoreCase("[SignShop]")
-                || marker.trim().equalsIgnoreCase("[AdminShop]"));
-    }
-
-    private long parseBuyPrice(String value) {
+    private long parsePrice(String value) {
         String clean = value.trim().replace(",", "");
-        Matcher matcher = BUY_PRICE.matcher(clean);
-        if (!matcher.find()) {
-            throw new NumberFormatException("Invalid shop price");
-        }
+        Matcher matcher = PRICE.matcher(clean);
+        if (!matcher.find()) throw new NumberFormatException("Invalid shop price");
         long price = Long.parseLong(matcher.group(1));
-        if (price <= 0) {
-            throw new NumberFormatException("Invalid shop price");
-        }
+        if (price <= 0) throw new NumberFormatException("Invalid shop price");
         return price;
     }
 
