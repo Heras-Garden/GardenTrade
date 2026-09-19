@@ -52,6 +52,7 @@ public final class GardenTrade extends JavaPlugin {
 
         ShopCommand shopCommand = new ShopCommand(
                 shops,
+                visuals,
                 maxPlayerShops,
                 getConfig().getInt("shops.max-per-organization", 30),
                 getConfig().getInt("shops.target-distance", 6)
@@ -68,6 +69,6 @@ public final class GardenTrade extends JavaPlugin {
                 new ShopSignListener(this, shops, visuals, maxPlayerShops), this);
         getServer().getPluginManager().registerEvents(
                 new ShopContainerListener(shops, visuals), this);
-        getLogger().info("GardenTrade enabled. Visual player shops and staff sign shops are active.");
+        getLogger().info("GardenTrade enabled. Stocked chest shops, linked sign shops, buybacks, and shop visuals are active.");
     }
 }
