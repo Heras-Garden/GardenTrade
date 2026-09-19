@@ -593,6 +593,86 @@ public final class ShopService {
         if (shop != null && shop.signShop()) clearStock(shopId);
     }
 
+    public ShopRecord setPrice(Player actor, ShopRecord requested, long price) throws SQLException {
+        if (price <= 0) throw new IllegalArgumentException("Price must be a positive whole number of Obols.");
+        return updateManagedLong(actor, requested, "price", price);
+    }
+
+    public ShopRecord setQuantity(Player actor, ShopRecord requested, int quantity) throws SQLException {
+        if (quantity <= 0 || quantity > 2304) {
+            throw new IllegalArgumentException("Quantity must be between 1 and 2304.");
+        }
+        return updateManagedLong(actor, requested, "quantity", quantity);
+    }
+
+    private ShopRecord updateManagedLong(Player actor, ShopRecord requested, String column, long value)
+            throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!canManage(actor, shop)) throw new IllegalArgumentException("You do not manage this shop.");
+        if (!column.equals("price") && !column.equals("quantity")) {
+            throw new IllegalArgumentException("That shop setting cannot be changed.");
+        }
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET " + column + " = ? WHERE shop_uuid = ?")) {
+            statement.setLong(1, value);
+            statement.setString(2, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
+    public ShopRecord setTransactionMode(Player actor, ShopRecord requested, String mode) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!canManage(actor, shop)) throw new IllegalArgumentException("You do not manage this shop.");
+        String normalized = mode == null ? "" : mode.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalized.equals("BUYBACK")) normalized = MODE_BUY;
+        if (!normalized.equals(MODE_SELL) && !normalized.equals(MODE_BUY)) {
+            throw new IllegalArgumentException("Mode must be sell or buy.");
+        }
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET transaction_mode = ? WHERE shop_uuid = ?")) {
+            statement.setString(1, normalized);
+            statement.setString(2, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
+    public ShopRecord setUnlimited(Player actor, ShopRecord requested, boolean unlimited) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!actor.hasPermission("gardentrade.shop.admin")) {
+            throw new IllegalArgumentException("Only administrators can change unlimited-stock mode.");
+        }
+        if (!canManage(actor, shop)) throw new IllegalArgumentException("You do not manage this shop.");
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET unlimited_stock = ? WHERE shop_uuid = ?")) {
+            statement.setInt(1, unlimited ? 1 : 0);
+            statement.setString(2, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
+    public ShopRecord setEnabled(Player actor, ShopRecord requested, boolean enabled) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!canManage(actor, shop)) throw new IllegalArgumentException("You do not manage this shop.");
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET enabled = ? WHERE shop_uuid = ?")) {
+            statement.setInt(1, enabled ? 1 : 0);
+            statement.setString(2, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
     public ShopRecord setVisualStyle(Player actor, ShopRecord requested, String style) throws SQLException {
         ShopRecord shop = find(requested.id())
                 .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
