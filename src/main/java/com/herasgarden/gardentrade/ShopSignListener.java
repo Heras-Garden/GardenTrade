@@ -2,6 +2,7 @@ package com.herasgarden.gardentrade;
 
 import com.herasgarden.gardencore.api.ui.GardenMessages;
 import com.herasgarden.gardentrade.model.ShopRecord;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.Directional;
@@ -47,43 +48,51 @@ public final class ShopSignListener implements Listener {
         }
 
         String marker = safe(event.getLine(0));
-        if (!marker.isBlank() && !marker.equalsIgnoreCase("[shop]")) {
+        if (!marker.equalsIgnoreCase("[signshop]") && !marker.equalsIgnoreCase("[adminshop]")) {
+            return;
+        }
+
+        Player player = event.getPlayer();
+        if (!player.hasPermission("gardentrade.shop.sign")) {
+            GardenMessages.send(player, "Sign shops are reserved for server staff.");
             return;
         }
 
         String quantityText = safe(event.getLine(1));
         String priceText = safe(event.getLine(2));
-        if (quantityText.isBlank() || priceText.isBlank()) {
+        String itemText = safe(event.getLine(3));
+        if (quantityText.isBlank() || priceText.isBlank() || itemText.isBlank()) {
+            GardenMessages.send(player,
+                    "Sign shops use: line 1 [SignShop], line 2 quantity, line 3 B price, line 4 item.");
             return;
         }
 
         int quantity;
         long price;
+        Material material;
         try {
             quantity = Integer.parseInt(quantityText.replace(",", ""));
             price = parseBuyPrice(priceText);
+            material = Material.matchMaterial(itemText.toUpperCase(Locale.ROOT).replace(' ', '_'));
+            if (material == null || material.isAir() || !material.isItem()) {
+                throw new NumberFormatException("Invalid shop item");
+            }
         } catch (NumberFormatException exception) {
-            GardenMessages.send(event.getPlayer(),
-                    "Shop signs use: line 1 [Shop], line 2 quantity, line 3 B price, line 4 ?.");
+            GardenMessages.send(player,
+                    "Use a valid quantity, buy price, and Minecraft item name on the sign.");
             return;
         }
 
-        Player player = event.getPlayer();
-        ItemStack held = player.getInventory().getItemInMainHand();
-        if (held == null || held.getType().isAir()) {
-            GardenMessages.send(player, "Hold the item this shop should sell while creating the sign.");
-            return;
-        }
-
+        ItemStack template = new ItemStack(material);
         try {
-            ShopRecord shop = shops.create(player, container, held, quantity, price, maxShops);
-            event.setLine(0, player.getName());
+            ShopRecord shop = shops.create(player, container, template, quantity, price, maxShops);
+            event.setLine(0, "[SignShop]");
             event.setLine(1, Integer.toString(shop.quantity()));
             event.setLine(2, "B " + shop.price());
             event.setLine(3, shop.itemLabel());
             plugin.getServer().getScheduler().runTask(plugin, visuals::refresh);
             GardenMessages.send(player,
-                    "Chest shop created: " + shop.quantity() + " " + shop.itemLabel()
+                    "Sign shop created: " + shop.quantity() + " " + shop.itemLabel()
                             + " for ⟡ " + shop.price() + ".");
         } catch (IllegalArgumentException exception) {
             GardenMessages.send(player, exception.getMessage());
@@ -170,8 +179,9 @@ public final class ShopSignListener implements Listener {
     }
 
     private boolean isShopSign(Sign sign) {
-        String price = sign.getSide(Side.FRONT).getLine(2);
-        return price != null && price.trim().toUpperCase(Locale.ROOT).startsWith("B ");
+        String marker = sign.getSide(Side.FRONT).getLine(0);
+        return marker != null && (marker.trim().equalsIgnoreCase("[SignShop]")
+                || marker.trim().equalsIgnoreCase("[AdminShop]"));
     }
 
     private long parseBuyPrice(String value) {

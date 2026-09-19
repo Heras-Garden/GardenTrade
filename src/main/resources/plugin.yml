@@ -29,5 +29,8 @@ permissions:
   gardentrade.shop.government.list:
     description: View Garden government storefronts.
     default: true
+  gardentrade.shop.sign:
+    description: Create and manage staff sign shops.
+    default: op
   gardentrade.shop.admin:
     default: op

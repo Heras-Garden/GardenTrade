@@ -66,6 +66,8 @@ public final class GardenTrade extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new ShopCleanupListener(shops), this);
         getServer().getPluginManager().registerEvents(
                 new ShopSignListener(this, shops, visuals, maxPlayerShops), this);
-        getLogger().info("GardenTrade enabled. ChestShop-style sign shops, visuals, and organization storefront transactions are active.");
+        getServer().getPluginManager().registerEvents(
+                new ShopContainerListener(shops, visuals), this);
+        getLogger().info("GardenTrade enabled. Visual player shops and staff sign shops are active.");
     }
 }
