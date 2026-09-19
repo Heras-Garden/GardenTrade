@@ -8,13 +8,18 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
+import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.Vector;
 
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -68,21 +73,42 @@ public final class ShopVisualService {
 
             Set<String> expected = new HashSet<>();
             for (ShopRecord shop : active.values()) {
-                org.bukkit.block.Block block = shops.blockFor(shop);
+                Block block = shops.blockFor(shop);
                 if (block == null) continue;
 
                 String style = shop.visualStyle() == null ? "BOTH" : shop.visualStyle().toUpperCase();
                 boolean soldOut = shops.isSoldOut(shop);
                 boolean cannotReceive = shop.buysFromCustomer() && !shops.canAcceptBuyback(shop);
                 boolean warning = soldOut || cannotReceive;
+                boolean frameStyle = style.equals("FRAME") && shop.containerShop();
 
                 ItemStack item = warning ? new ItemStack(Material.BARRIER) : shops.displayItem(shop);
                 Component text = label(shop, soldOut, cannotReceive);
-                Location itemLocation = block.getLocation().add(0.5, shop.signShop() ? 1.0 : 1.25, 0.5);
-                Location textLocation = block.getLocation().add(0.5, shop.signShop() ? 1.45 : 1.75, 0.5);
 
-                boolean showItem = warning || style.equals("BOTH") || style.equals("ITEM");
-                boolean showText = warning || style.equals("BOTH") || style.equals("TEXT");
+                BlockFace face = displayFace(block);
+                Location frameLocation = frameLocation(block, face);
+                Location itemLocation = block.getLocation().add(0.5, shop.signShop() ? 1.0 : 1.25, 0.5);
+                Location textLocation = frameStyle
+                        ? frameLocation.clone().add(face.getDirection().multiply(0.08)).add(0.0, 0.62, 0.0)
+                        : block.getLocation().add(0.5, shop.signShop() ? 1.45 : 1.75, 0.5);
+
+                boolean showFrame = frameStyle;
+                boolean showItem = !frameStyle && (warning || style.equals("BOTH") || style.equals("ITEM"));
+                boolean showText = warning || style.equals("BOTH") || style.equals("TEXT") || frameStyle;
+
+                if (showFrame) {
+                    String frameKey = shop.id() + ":frame";
+                    expected.add(frameKey);
+                    Entity frameEntity = existing.get(frameKey);
+                    if (frameEntity instanceof ItemFrame frame) {
+                        frame.teleport(frameLocation);
+                        frame.setFacingDirection(face, true);
+                        frame.setItem(item);
+                        configureFrame(frame, shop.id());
+                    } else {
+                        spawnFrame(shop.id(), frameLocation, face, item);
+                    }
+                }
 
                 if (showItem) {
                     String itemKey = shop.id() + ":item";
@@ -117,6 +143,12 @@ public final class ShopVisualService {
         }
     }
 
+    public boolean isProtectedFrame(Entity entity) {
+        if (!(entity instanceof ItemFrame)) return false;
+        String type = entity.getPersistentDataContainer().get(typeKey, PersistentDataType.STRING);
+        return "frame".equalsIgnoreCase(type);
+    }
+
     private Component label(ShopRecord shop, boolean soldOut, boolean cannotReceive) {
         if (soldOut) {
             return Component.text("SOLD OUT", NamedTextColor.RED)
@@ -132,6 +164,38 @@ public final class ShopVisualService {
         String unlimited = shop.unlimitedStock() ? " • Unlimited" : "";
         return Component.text(action + shop.quantity() + " " + shop.itemLabel()
                 + " • ⟡ " + shop.price() + unlimited, NamedTextColor.WHITE);
+    }
+
+    private BlockFace displayFace(Block block) {
+        if (block.getBlockData() instanceof Directional directional) {
+            BlockFace face = directional.getFacing();
+            if (face == BlockFace.UP || face == BlockFace.DOWN) return BlockFace.NORTH;
+            return face;
+        }
+        return BlockFace.NORTH;
+    }
+
+    private Location frameLocation(Block block, BlockFace face) {
+        Vector offset = face.getDirection().multiply(0.51);
+        return block.getLocation().add(0.5, 0.52, 0.5).add(offset);
+    }
+
+    private void configureFrame(ItemFrame frame, UUID shopId) {
+        frame.getPersistentDataContainer().set(shopKey, PersistentDataType.STRING, shopId.toString());
+        frame.getPersistentDataContainer().set(typeKey, PersistentDataType.STRING, "frame");
+        frame.setVisible(false);
+        frame.setFixed(true);
+        frame.setInvulnerable(true);
+        frame.setPersistent(true);
+        frame.setSilent(true);
+    }
+
+    private void spawnFrame(UUID shopId, Location location, BlockFace face, ItemStack item) {
+        location.getWorld().spawn(location, ItemFrame.class, frame -> {
+            configureFrame(frame, shopId);
+            frame.setFacingDirection(face, true);
+            frame.setItem(item);
+        });
     }
 
     private void spawnItem(UUID shopId, Location location, ItemStack item) {
@@ -152,6 +216,7 @@ public final class ShopVisualService {
             display.setBillboard(Display.Billboard.CENTER);
             display.setSeeThrough(true);
             display.setShadowed(true);
+            display.setPersistent(true);
         });
     }
 }

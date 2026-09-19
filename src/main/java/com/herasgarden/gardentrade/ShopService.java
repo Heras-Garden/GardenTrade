@@ -680,8 +680,11 @@ public final class ShopService {
             throw new IllegalArgumentException("You do not manage this shop.");
         }
         String normalized = style == null ? "" : style.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!List.of("BOTH", "ITEM", "TEXT", "NONE").contains(normalized)) {
-            throw new IllegalArgumentException("Appearance must be both, item, text, or none.");
+        if (!List.of("BOTH", "ITEM", "TEXT", "FRAME", "NONE").contains(normalized)) {
+            throw new IllegalArgumentException("Appearance must be both, item, text, frame, or none.");
+        }
+        if ("FRAME".equals(normalized) && !shop.containerShop()) {
+            throw new IllegalArgumentException("Invisible item-frame displays are only available for container shops.");
         }
         try (Connection connection = platform.storage().connection();
              PreparedStatement statement = connection.prepareStatement(
