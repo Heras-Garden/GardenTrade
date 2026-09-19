@@ -10,7 +10,7 @@ depend: [GardenCore, GardenLands]
 commands:
   shop:
     description: Create and use Garden shops.
-    usage: /shop <create|companycreate|companylist|governmentcreate|governmentlist|info|buy|delete|list>
+    usage: /shop <create|createbuy|info|buy|settings|link|unlink|appearance|setprice|setquantity|mode|delete|list>
 
 permissions:
   gardentrade.shop:
@@ -30,7 +30,7 @@ permissions:
     description: View Garden government storefronts.
     default: true
   gardentrade.shop.sign:
-    description: Create and manage staff sign shops.
-    default: op
+    description: Create stock-backed player sign shops.
+    default: true
   gardentrade.shop.admin:
     default: op
