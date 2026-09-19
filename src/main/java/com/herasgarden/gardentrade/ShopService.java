@@ -887,25 +887,26 @@ public final class ShopService {
             return PurchaseResult.failure("That shop does not currently have enough Obols to buy your items.");
         }
 
-        if (!platform.currency().deposit(seller.getUniqueId(), total)) {
-            creditPrincipal(principal, total);
-            restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
-            platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Seller payout failed and shop funds restored");
-            return PurchaseResult.failure("Your payout could not be completed. Your items were returned.");
-        }
-
         if (stock != null) {
             Map<Integer, ItemStack> leftovers = stock.addItem(stacks(template, itemCount).toArray(ItemStack[]::new));
             if (!leftovers.isEmpty()) {
-                removeSimilar(stock, template, itemCount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum());
-                if (platform.currency().withdraw(seller.getUniqueId(), total)) {
-                    creditPrincipal(principal, total);
-                }
+                int inserted = itemCount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+                if (inserted > 0) removeSimilar(stock, template, inserted);
+                creditPrincipal(principal, total);
                 restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
                 platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
                         "Receiving container changed during buyback; transaction rolled back");
                 return PurchaseResult.failure("The receiving container changed. Your items were returned.");
             }
+        }
+
+        if (!platform.currency().deposit(seller.getUniqueId(), total)) {
+            if (stock != null) removeSimilar(stock, template, itemCount);
+            creditPrincipal(principal, total);
+            restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
+            platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED,
+                    "Seller payout failed; received items and shop funds were restored");
+            return PurchaseResult.failure("Your payout could not be completed. Your items were returned.");
         }
 
         platform.orders().transition(order.id(), OrderState.PAID, "Seller payout completed");
