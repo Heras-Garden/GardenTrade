@@ -16,6 +16,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Container;
+import org.bukkit.block.Sign;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -27,6 +28,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -35,11 +37,17 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class ShopService {
+    private static final String KIND_CONTAINER = "CONTAINER";
+    private static final String KIND_SIGN = "SIGN";
+    private static final String MODE_SELL = "SELL";
+    private static final String MODE_BUY = "BUY";
+
     private final JavaPlugin plugin;
     private final GardenPlatform platform;
     private final LandAccessService land;
     private final OrganizationDirectory organizations;
     private final Map<UUID, Object> purchaseLocks = new ConcurrentHashMap<>();
+    private final Map<UUID, UUID> pendingStockLinks = new ConcurrentHashMap<>();
 
     public ShopService(JavaPlugin plugin, GardenPlatform platform, LandAccessService land,
                        OrganizationDirectory organizations) {
@@ -51,40 +59,59 @@ public final class ShopService {
 
     public ShopRecord create(Player owner, Block block, ItemStack template, int quantity, long price, int maxShops)
             throws SQLException {
+        return createPlayerContainer(owner, block, template, quantity, price, MODE_SELL, maxShops);
+    }
+
+    public ShopRecord createBuyback(
+            Player owner, Block block, ItemStack template, int quantity, long price, int maxShops)
+            throws SQLException {
+        return createPlayerContainer(owner, block, template, quantity, price, MODE_BUY, maxShops);
+    }
+
+    private ShopRecord createPlayerContainer(
+            Player owner,
+            Block block,
+            ItemStack template,
+            int quantity,
+            long price,
+            String mode,
+            int maxShops
+    ) throws SQLException {
         ShopPrincipal principal = new ShopPrincipal("PLAYER", owner.getUniqueId(), owner.getName());
-        if (!owner.hasPermission("gardentrade.shop.admin") && countPrincipal(principal) >= maxShops) {
-            throw new IllegalArgumentException("You have reached your Garden shop limit.");
-        }
-        return createShop(owner, block, template, quantity, price, principal);
+        enforceLimit(owner, principal, maxShops, "You have reached your Garden shop limit.");
+        return createShop(owner, block, template, quantity, price, principal,
+                KIND_CONTAINER, mode, false, block);
     }
 
     public ShopRecord createCompany(
-            Player actor,
-            String companyName,
-            Block block,
-            ItemStack template,
-            int quantity,
-            long price,
-            int maxShops
-    ) throws SQLException {
-        return createOrganizationShop(
-                actor, companyName, "COMPANY", "company", block, template, quantity, price, maxShops);
+            Player actor, String companyName, Block block, ItemStack template,
+            int quantity, long price, int maxShops) throws SQLException {
+        return createOrganizationContainer(actor, companyName, "COMPANY", "company",
+                block, template, quantity, price, MODE_SELL, maxShops);
+    }
+
+    public ShopRecord createCompanyBuyback(
+            Player actor, String companyName, Block block, ItemStack template,
+            int quantity, long price, int maxShops) throws SQLException {
+        return createOrganizationContainer(actor, companyName, "COMPANY", "company",
+                block, template, quantity, price, MODE_BUY, maxShops);
     }
 
     public ShopRecord createGovernment(
-            Player actor,
-            String governmentName,
-            Block block,
-            ItemStack template,
-            int quantity,
-            long price,
-            int maxShops
-    ) throws SQLException {
-        return createOrganizationShop(
-                actor, governmentName, "GOVERNMENT", "government", block, template, quantity, price, maxShops);
+            Player actor, String governmentName, Block block, ItemStack template,
+            int quantity, long price, int maxShops) throws SQLException {
+        return createOrganizationContainer(actor, governmentName, "GOVERNMENT", "government",
+                block, template, quantity, price, MODE_SELL, maxShops);
     }
 
-    private ShopRecord createOrganizationShop(
+    public ShopRecord createGovernmentBuyback(
+            Player actor, String governmentName, Block block, ItemStack template,
+            int quantity, long price, int maxShops) throws SQLException {
+        return createOrganizationContainer(actor, governmentName, "GOVERNMENT", "government",
+                block, template, quantity, price, MODE_BUY, maxShops);
+    }
+
+    private ShopRecord createOrganizationContainer(
             Player actor,
             String organizationName,
             String organizationType,
@@ -93,8 +120,63 @@ public final class ShopService {
             ItemStack template,
             int quantity,
             long price,
+            String mode,
             int maxShops
     ) throws SQLException {
+        ShopPrincipal principal = organizationPrincipal(actor, organizationName, organizationType, label, maxShops);
+        return createShop(actor, block, template, quantity, price, principal,
+                KIND_CONTAINER, mode, false, block);
+    }
+
+    public ShopRecord createSign(
+            Player actor,
+            Block signBlock,
+            ItemStack template,
+            int quantity,
+            long price,
+            boolean buyback,
+            boolean unlimited,
+            int maxShops
+    ) throws SQLException {
+        ShopPrincipal principal = new ShopPrincipal("PLAYER", actor.getUniqueId(), actor.getName());
+        enforceLimit(actor, principal, maxShops, "You have reached your Garden shop limit.");
+        return createShop(actor, signBlock, template, quantity, price, principal,
+                KIND_SIGN, buyback ? MODE_BUY : MODE_SELL, unlimited, null);
+    }
+
+    public ShopRecord createCompanySign(
+            Player actor,
+            String companyName,
+            Block signBlock,
+            ItemStack template,
+            int quantity,
+            long price,
+            boolean buyback,
+            int maxShops
+    ) throws SQLException {
+        ShopPrincipal principal = organizationPrincipal(actor, companyName, "COMPANY", "company", maxShops);
+        return createShop(actor, signBlock, template, quantity, price, principal,
+                KIND_SIGN, buyback ? MODE_BUY : MODE_SELL, false, null);
+    }
+
+    public ShopRecord createGovernmentSign(
+            Player actor,
+            String governmentName,
+            Block signBlock,
+            ItemStack template,
+            int quantity,
+            long price,
+            boolean buyback,
+            int maxShops
+    ) throws SQLException {
+        ShopPrincipal principal = organizationPrincipal(actor, governmentName, "GOVERNMENT", "government", maxShops);
+        return createShop(actor, signBlock, template, quantity, price, principal,
+                KIND_SIGN, buyback ? MODE_BUY : MODE_SELL, false, null);
+    }
+
+    private ShopPrincipal organizationPrincipal(
+            Player actor, String organizationName, String organizationType, String label, int maxShops)
+            throws SQLException {
         OrganizationView organization = organization(organizationName, organizationType, label);
         if (!actor.hasPermission("gardentrade.shop.admin")
                 && !organizations.has(
@@ -102,33 +184,48 @@ public final class ShopService {
             throw new IllegalArgumentException("Your " + label + " role cannot manage storefronts.");
         }
 
-        ShopPrincipal principal = new ShopPrincipal(
-                "ORGANIZATION", organization.id(), organization.name());
+        ShopPrincipal principal = new ShopPrincipal("ORGANIZATION", organization.id(), organization.name());
+        enforceLimit(actor, principal, maxShops,
+                "That " + label + " has reached its Garden shop limit.");
+        return principal;
+    }
+
+    private void enforceLimit(Player actor, ShopPrincipal principal, int maxShops, String message)
+            throws SQLException {
         if (!actor.hasPermission("gardentrade.shop.admin") && countPrincipal(principal) >= maxShops) {
-            throw new IllegalArgumentException(
-                    "That " + label + " has reached its Garden shop limit.");
+            throw new IllegalArgumentException(message);
         }
-        return createShop(actor, block, template, quantity, price, principal);
     }
 
     private ShopRecord createShop(
             Player actor,
-            Block block,
+            Block storefront,
             ItemStack template,
             int quantity,
             long price,
-            ShopPrincipal principal
+            ShopPrincipal principal,
+            String shopKind,
+            String transactionMode,
+            boolean unlimited,
+            Block initialStock
     ) throws SQLException {
-        if (!ShopBlockKey.supported(block)) {
+        boolean containerKind = KIND_CONTAINER.equals(shopKind);
+        boolean signKind = KIND_SIGN.equals(shopKind);
+        if (containerKind && !ShopBlockKey.supported(storefront)) {
             throw new IllegalArgumentException("Look directly at a chest, barrel, or other container.");
         }
-        if (!actor.hasPermission("gardentrade.shop.admin")) {
-            if (land == null || land.claimIdAt(block).isEmpty() || !land.canManage(actor, block)) {
-                throw new IllegalArgumentException("You can only create a shop inside Garden land you manage.");
-            }
+        if (signKind && !(storefront.getState() instanceof Sign)) {
+            throw new IllegalArgumentException("Look directly at the shop sign.");
         }
+        if (unlimited && !actor.hasPermission("gardentrade.shop.admin")) {
+            throw new IllegalArgumentException("Only administrators can create unlimited-stock shops.");
+        }
+
+        validateLand(actor, storefront);
         if (template == null || template.getType().isAir()) {
-            throw new IllegalArgumentException("Hold the item this shop should sell.");
+            throw new IllegalArgumentException(transactionMode.equals(MODE_BUY)
+                    ? "Hold the item this shop should buy."
+                    : "Hold the item this shop should sell.");
         }
         if (quantity <= 0 || quantity > 2304) {
             throw new IllegalArgumentException("Quantity must be between 1 and 2304.");
@@ -137,11 +234,12 @@ public final class ShopService {
             throw new IllegalArgumentException("Price must be a positive whole number of Obols.");
         }
 
-        ShopBlockKey key = ShopBlockKey.of(block);
-        if (shopAt(key).isPresent()) {
-            throw new IllegalArgumentException("That container already has a Garden shop.");
+        Block anchor = containerKind ? canonicalContainer(storefront) : storefront;
+        if (shopAt(anchor).isPresent()) {
+            throw new IllegalArgumentException("That storefront already has a Garden shop.");
         }
 
+        Block stock = initialStock == null ? null : canonicalContainer(initialStock);
         ItemStack one = template.clone();
         one.setAmount(1);
         String itemData = serialize(one);
@@ -155,21 +253,27 @@ public final class ShopService {
                 try (PreparedStatement statement = connection.prepareStatement(
                         "INSERT INTO gt_shops "
                                 + "(shop_uuid, owner_uuid, owner_name, world_uuid, world_name, x, y, z, "
-                                + "item_data, item_label, quantity, price, enabled, created_at) "
-                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")) {
+                                + "item_data, item_label, quantity, price, shop_kind, transaction_mode, "
+                                + "unlimited_stock, stock_world_uuid, stock_world_name, stock_x, stock_y, stock_z, "
+                                + "visual_style, enabled, created_at) "
+                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOTH', 1, ?)")) {
                     statement.setString(1, id.toString());
                     statement.setString(2, actor.getUniqueId().toString());
                     statement.setString(3, actor.getName());
-                    statement.setString(4, key.worldId().toString());
-                    statement.setString(5, block.getWorld().getName());
-                    statement.setInt(6, key.x());
-                    statement.setInt(7, key.y());
-                    statement.setInt(8, key.z());
+                    statement.setString(4, anchor.getWorld().getUID().toString());
+                    statement.setString(5, anchor.getWorld().getName());
+                    statement.setInt(6, anchor.getX());
+                    statement.setInt(7, anchor.getY());
+                    statement.setInt(8, anchor.getZ());
                     statement.setString(9, itemData);
                     statement.setString(10, label);
                     statement.setInt(11, quantity);
                     statement.setLong(12, price);
-                    statement.setLong(13, now);
+                    statement.setString(13, shopKind);
+                    statement.setString(14, transactionMode);
+                    statement.setInt(15, unlimited ? 1 : 0);
+                    setStock(statement, 16, stock);
+                    statement.setLong(21, now);
                     statement.executeUpdate();
                 }
                 try (PreparedStatement statement = connection.prepareStatement(
@@ -192,24 +296,74 @@ public final class ShopService {
             }
         }
 
-        return new ShopRecord(id, actor.getUniqueId(), actor.getName(),
-                key.worldId(), block.getWorld().getName(), key.x(), key.y(), key.z(),
-                itemData, label, quantity, price, true, now);
+        return find(id).orElseThrow(() -> new SQLException("Created shop could not be reloaded."));
+    }
+
+    private void setStock(PreparedStatement statement, int startIndex, Block stock) throws SQLException {
+        if (stock == null) {
+            statement.setNull(startIndex, Types.VARCHAR);
+            statement.setNull(startIndex + 1, Types.VARCHAR);
+            statement.setNull(startIndex + 2, Types.INTEGER);
+            statement.setNull(startIndex + 3, Types.INTEGER);
+            statement.setNull(startIndex + 4, Types.INTEGER);
+            return;
+        }
+        statement.setString(startIndex, stock.getWorld().getUID().toString());
+        statement.setString(startIndex + 1, stock.getWorld().getName());
+        statement.setInt(startIndex + 2, stock.getX());
+        statement.setInt(startIndex + 3, stock.getY());
+        statement.setInt(startIndex + 4, stock.getZ());
+    }
+
+    private void validateLand(Player actor, Block block) {
+        if (actor.hasPermission("gardentrade.shop.admin")) return;
+        if (land == null || land.claimIdAt(block).isEmpty() || !land.canManage(actor, block)) {
+            throw new IllegalArgumentException("You can only create a shop inside Garden land you manage.");
+        }
+    }
+
+    private Block canonicalContainer(Block block) {
+        if (!ShopBlockKey.supported(block)) {
+            throw new IllegalArgumentException("Choose a chest, barrel, or other container.");
+        }
+        ShopBlockKey key = ShopBlockKey.of(block);
+        World world = Bukkit.getWorld(key.worldId());
+        return world == null ? block : world.getBlockAt(key.x(), key.y(), key.z());
+    }
+
+    public Optional<ShopRecord> find(UUID shopId) throws SQLException {
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT * FROM gt_shops WHERE shop_uuid = ? LIMIT 1")) {
+            statement.setString(1, shopId.toString());
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? Optional.of(read(result)) : Optional.empty();
+            }
+        }
     }
 
     public Optional<ShopRecord> shopAt(Block block) throws SQLException {
-        if (!ShopBlockKey.supported(block)) return Optional.empty();
-        return shopAt(ShopBlockKey.of(block));
+        if (block == null) return Optional.empty();
+        if (ShopBlockKey.supported(block)) {
+            ShopBlockKey key = ShopBlockKey.of(block);
+            Optional<ShopRecord> canonical = shopAt(key.worldId(), key.x(), key.y(), key.z());
+            if (canonical.isPresent()) return canonical;
+        }
+        return shopAt(block.getWorld().getUID(), block.getX(), block.getY(), block.getZ());
     }
 
     public Optional<ShopRecord> shopAt(ShopBlockKey key) throws SQLException {
+        return shopAt(key.worldId(), key.x(), key.y(), key.z());
+    }
+
+    private Optional<ShopRecord> shopAt(UUID worldId, int x, int y, int z) throws SQLException {
         try (Connection connection = platform.storage().connection();
              PreparedStatement statement = connection.prepareStatement(
                      "SELECT * FROM gt_shops WHERE world_uuid = ? AND x = ? AND y = ? AND z = ? LIMIT 1")) {
-            statement.setString(1, key.worldId().toString());
-            statement.setInt(2, key.x());
-            statement.setInt(3, key.y());
-            statement.setInt(4, key.z());
+            statement.setString(1, worldId.toString());
+            statement.setInt(2, x);
+            statement.setInt(3, y);
+            statement.setInt(4, z);
             try (ResultSet result = statement.executeQuery()) {
                 return result.next() ? Optional.of(read(result)) : Optional.empty();
             }
@@ -222,9 +376,7 @@ public final class ShopService {
              PreparedStatement statement = connection.prepareStatement(
                      "SELECT * FROM gt_shops WHERE enabled = 1 ORDER BY created_at ASC");
              ResultSet result = statement.executeQuery()) {
-            while (result.next()) {
-                records.add(read(result));
-            }
+            while (result.next()) records.add(read(result));
         }
         return List.copyOf(records);
     }
@@ -234,7 +386,34 @@ public final class ShopService {
     }
 
     public Block blockFor(ShopRecord shop) {
-        return block(shop);
+        World world = Bukkit.getWorld(shop.worldId());
+        if (world == null) world = Bukkit.getWorld(shop.worldName());
+        return world == null ? null : world.getBlockAt(shop.x(), shop.y(), shop.z());
+    }
+
+    public Block stockBlockFor(ShopRecord shop) {
+        if (!shop.hasStockContainer()) return null;
+        World world = Bukkit.getWorld(shop.stockWorldId());
+        if (world == null && shop.stockWorldName() != null) {
+            world = Bukkit.getWorld(shop.stockWorldName());
+        }
+        return world == null ? null : world.getBlockAt(shop.stockX(), shop.stockY(), shop.stockZ());
+    }
+
+    public boolean isSoldOut(ShopRecord shop) {
+        if (!shop.sellsToCustomer() || shop.unlimitedStock()) return false;
+        Block stockBlock = stockBlockFor(shop);
+        if (stockBlock == null || !(stockBlock.getState() instanceof Container container)) return true;
+        ItemStack template = displayItem(shop);
+        return countSimilar(container.getInventory(), template) < shop.quantity();
+    }
+
+    public boolean canAcceptBuyback(ShopRecord shop) {
+        if (!shop.buysFromCustomer()) return false;
+        if (shop.unlimitedStock()) return true;
+        Block stockBlock = stockBlockFor(shop);
+        if (stockBlock == null || !(stockBlock.getState() instanceof Container container)) return false;
+        return hasSpace(container.getInventory(), displayItem(shop), shop.quantity());
     }
 
     public boolean canManage(Player actor, ShopRecord shop) throws SQLException {
@@ -301,7 +480,6 @@ public final class ShopService {
                 }
             }
         }
-        // Backward compatibility for shops created before the principal table existed.
         return new ShopPrincipal("PLAYER", shop.ownerId(), shop.ownerName());
     }
 
@@ -321,6 +499,120 @@ public final class ShopService {
         return List.copyOf(records);
     }
 
+    public void beginStockLink(Player actor, ShopRecord shop) throws SQLException {
+        if (!shop.signShop()) {
+            throw new IllegalArgumentException("Chest shops already use their own container as stock.");
+        }
+        if (shop.unlimitedStock()) {
+            throw new IllegalArgumentException("Unlimited admin shops do not need a stock container.");
+        }
+        if (!canManage(actor, shop)) {
+            throw new IllegalArgumentException("You do not manage this shop.");
+        }
+        pendingStockLinks.put(actor.getUniqueId(), shop.id());
+    }
+
+    public LinkResult completePendingStockLink(Player actor, Block clicked) throws SQLException {
+        UUID shopId = pendingStockLinks.get(actor.getUniqueId());
+        if (shopId == null) return LinkResult.notPending();
+        if (!ShopBlockKey.supported(clicked)) {
+            return LinkResult.handled(false, "Choose a chest, barrel, or other container for stock.");
+        }
+
+        ShopRecord shop = find(shopId).orElse(null);
+        if (shop == null) {
+            pendingStockLinks.remove(actor.getUniqueId());
+            return LinkResult.handled(false, "That shop no longer exists.");
+        }
+        if (!canManage(actor, shop)) {
+            pendingStockLinks.remove(actor.getUniqueId());
+            return LinkResult.handled(false, "You no longer manage that shop.");
+        }
+
+        validateLand(actor, clicked);
+        Block stock = canonicalContainer(clicked);
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET stock_world_uuid = ?, stock_world_name = ?, "
+                             + "stock_x = ?, stock_y = ?, stock_z = ? WHERE shop_uuid = ?")) {
+            statement.setString(1, stock.getWorld().getUID().toString());
+            statement.setString(2, stock.getWorld().getName());
+            statement.setInt(3, stock.getX());
+            statement.setInt(4, stock.getY());
+            statement.setInt(5, stock.getZ());
+            statement.setString(6, shop.id().toString());
+            statement.executeUpdate();
+        }
+        pendingStockLinks.remove(actor.getUniqueId());
+        return LinkResult.handled(true, "Stock container linked to " + shop.itemLabel() + " shop.");
+    }
+
+    public ShopRecord unlinkStock(Player actor, ShopRecord requested) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!shop.signShop()) {
+            throw new IllegalArgumentException("Chest shops cannot unlink their own stock container.");
+        }
+        if (!canManage(actor, shop)) {
+            throw new IllegalArgumentException("You do not manage this shop.");
+        }
+        clearStock(shop.id());
+        return find(shop.id()).orElseThrow();
+    }
+
+    private void clearStock(UUID shopId) throws SQLException {
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET stock_world_uuid = NULL, stock_world_name = NULL, "
+                             + "stock_x = NULL, stock_y = NULL, stock_z = NULL WHERE shop_uuid = ?")) {
+            statement.setString(1, shopId.toString());
+            statement.executeUpdate();
+        }
+    }
+
+    public List<ShopRecord> shopsUsingStock(Block block) throws SQLException {
+        if (!ShopBlockKey.supported(block)) return List.of();
+        Block stock = canonicalContainer(block);
+        List<ShopRecord> records = new ArrayList<>();
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT * FROM gt_shops WHERE stock_world_uuid = ? AND stock_x = ? AND stock_y = ? AND stock_z = ?")) {
+            statement.setString(1, stock.getWorld().getUID().toString());
+            statement.setInt(2, stock.getX());
+            statement.setInt(3, stock.getY());
+            statement.setInt(4, stock.getZ());
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) records.add(read(result));
+            }
+        }
+        return List.copyOf(records);
+    }
+
+    public void unlinkStockBecauseBroken(UUID shopId) throws SQLException {
+        ShopRecord shop = find(shopId).orElse(null);
+        if (shop != null && shop.signShop()) clearStock(shopId);
+    }
+
+    public ShopRecord setVisualStyle(Player actor, ShopRecord requested, String style) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!canManage(actor, shop)) {
+            throw new IllegalArgumentException("You do not manage this shop.");
+        }
+        String normalized = style == null ? "" : style.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!List.of("BOTH", "ITEM", "TEXT", "NONE").contains(normalized)) {
+            throw new IllegalArgumentException("Appearance must be both, item, text, or none.");
+        }
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET visual_style = ? WHERE shop_uuid = ?")) {
+            statement.setString(1, normalized);
+            statement.setString(2, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
     public boolean delete(Player actor, Block block) throws SQLException {
         Optional<ShopRecord> existing = shopAt(block);
         if (existing.isEmpty()) return false;
@@ -335,6 +627,7 @@ public final class ShopService {
     }
 
     public boolean delete(UUID shopId) throws SQLException {
+        pendingStockLinks.entrySet().removeIf(entry -> entry.getValue().equals(shopId));
         try (Connection connection = platform.storage().connection()) {
             connection.setAutoCommit(false);
             try {
@@ -360,16 +653,18 @@ public final class ShopService {
         }
     }
 
-    public PurchaseResult purchase(Player buyer, ShopRecord shop, int units) throws SQLException {
+    public PurchaseResult purchase(Player customer, ShopRecord requested, int units) throws SQLException {
         if (units <= 0 || units > 64) {
-            return PurchaseResult.failure("Purchase units must be between 1 and 64.");
+            return PurchaseResult.failure("Transaction units must be between 1 and 64.");
         }
-        if (!shop.enabled()) {
-            return PurchaseResult.failure("That shop is disabled.");
+
+        ShopRecord shop = find(requested.id()).orElse(null);
+        if (shop == null || !shop.enabled()) {
+            return PurchaseResult.failure("That shop is unavailable.");
         }
 
         ShopPrincipal principal = principal(shop);
-        if (principal.player() && principal.id().equals(buyer.getUniqueId())) {
+        if (principal.player() && principal.id().equals(customer.getUniqueId())) {
             return PurchaseResult.failure("You already own this shop.");
         }
 
@@ -379,114 +674,201 @@ public final class ShopService {
             total = Math.multiplyExact(shop.price(), units);
             itemCount = Math.multiplyExact(shop.quantity(), units);
         } catch (ArithmeticException exception) {
-            return PurchaseResult.failure("That purchase is too large.");
+            return PurchaseResult.failure("That transaction is too large.");
         }
 
         Object lock = purchaseLocks.computeIfAbsent(shop.id(), ignored -> new Object());
         synchronized (lock) {
-            Block block = block(shop);
-            if (block == null || !(block.getState() instanceof Container container)) {
-                return PurchaseResult.failure("The shop container is missing.");
-            }
+            return shop.buysFromCustomer()
+                    ? sellToShop(customer, shop, principal, itemCount, total, units)
+                    : buyFromShop(customer, shop, principal, itemCount, total, units);
+        }
+    }
 
-            ItemStack template;
-            try {
-                template = deserialize(shop.itemData());
-            } catch (IllegalArgumentException exception) {
-                return PurchaseResult.failure("The shop item data is invalid.");
+    private PurchaseResult buyFromShop(
+            Player buyer, ShopRecord shop, ShopPrincipal principal, int itemCount, long total, int units)
+            throws SQLException {
+        ItemStack template = displayItem(shop);
+        Block stockBlock = null;
+        Inventory stock = null;
+        if (!shop.unlimitedStock()) {
+            stockBlock = stockBlockFor(shop);
+            if (stockBlock == null || !(stockBlock.getState() instanceof Container container)) {
+                return PurchaseResult.failure(shop.signShop()
+                        ? "That sign shop is not connected to a stock container."
+                        : "The shop container is missing.");
             }
-
-            Inventory stock = container.getInventory();
+            stock = container.getInventory();
             if (countSimilar(stock, template) < itemCount) {
-                return PurchaseResult.failure("That shop is out of stock.");
+                return PurchaseResult.failure("That shop is sold out.");
             }
-            if (!hasSpace(buyer.getInventory(), template, itemCount)) {
-                return PurchaseResult.failure("You do not have enough inventory space.");
+        }
+        if (!hasSpace(buyer.getInventory(), template, itemCount)) {
+            return PurchaseResult.failure("You do not have enough inventory space.");
+        }
+
+        GardenOrder order = order(buyer, shop, principal, total, units, itemCount, "SELL");
+        platform.orders().transition(order.id(), OrderState.READY, "Shop stock validated");
+        platform.orders().transition(order.id(), OrderState.AWAITING_CONFIRMATION, "Shop interaction confirms purchase");
+        platform.orders().transition(order.id(), OrderState.PAYMENT_PENDING, "Collecting shop payment");
+
+        if (stock != null && !removeSimilar(stock, template, itemCount)) {
+            platform.orders().transition(order.id(), OrderState.CANCELLED, "Shop stock changed");
+            return PurchaseResult.failure("The shop stock changed. Try again.");
+        }
+
+        if (!platform.currency().withdraw(buyer.getUniqueId(), total)) {
+            if (stock != null) restore(stock, template, itemCount, stockBlock);
+            platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Buyer has insufficient Obols");
+            return PurchaseResult.failure("You do not have enough Obols.");
+        }
+
+        if (!creditPrincipal(principal, total)) {
+            boolean refunded = platform.currency().deposit(buyer.getUniqueId(), total);
+            if (stock != null) restore(stock, template, itemCount, stockBlock);
+            platform.orders().transition(order.id(),
+                    refunded ? OrderState.PAYMENT_FAILED : OrderState.FULFILLMENT_FAILED,
+                    refunded ? "Seller payment failed and buyer refunded"
+                            : "Seller payment failed and buyer refund requires admin review");
+            return PurchaseResult.failure(refunded
+                    ? "The shop owner could not be paid. Your Obols were returned."
+                    : "The purchase needs administrator review.");
+        }
+
+        platform.orders().transition(order.id(), OrderState.PAID, "Shop payment completed");
+        platform.orders().transition(order.id(), OrderState.FULFILLING, "Delivering purchased items");
+
+        int before = countSimilar(buyer.getInventory(), template);
+        Map<Integer, ItemStack> leftovers =
+                buyer.getInventory().addItem(stacks(template, itemCount).toArray(ItemStack[]::new));
+        if (!leftovers.isEmpty()) {
+            int after = countSimilar(buyer.getInventory(), template);
+            int delivered = Math.max(0, after - before);
+            if (delivered > 0) removeSimilar(buyer.getInventory(), template, delivered);
+            if (stock != null) restore(stock, template, itemCount, stockBlock);
+
+            if (!debitPrincipal(principal, total)) {
+                platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
+                        "Inventory changed; shop payout could not be reversed");
+                return PurchaseResult.failure("The purchase needs administrator review.");
             }
-
-            GardenOrder order = platform.orders().create(
-                    OrderType.SHOP_PURCHASE,
-                    buyer.getUniqueId(),
-                    principal.kind(),
-                    principal.id().toString(),
-                    total,
-                    "gardentrade.shop",
-                    shop.id().toString(),
-                    "{\"units\":" + units + ",\"itemCount\":" + itemCount
-                            + ",\"item\":\"" + json(shop.itemLabel())
-                            + "\",\"sellerName\":\"" + json(principal.displayName()) + "\"}"
-            );
-            platform.orders().transition(order.id(), OrderState.READY, "Shop stock validated");
-            platform.orders().transition(order.id(), OrderState.AWAITING_CONFIRMATION, "Buy command confirms purchase");
-            platform.orders().transition(order.id(), OrderState.PAYMENT_PENDING, "Collecting shop payment");
-
-            if (!removeSimilar(stock, template, itemCount)) {
-                platform.orders().transition(order.id(), OrderState.CANCELLED, "Shop stock changed");
-                return PurchaseResult.failure("The shop stock changed. Try again.");
+            if (!platform.currency().deposit(buyer.getUniqueId(), total)) {
+                creditPrincipal(principal, total);
+                platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
+                        "Inventory changed; buyer refund failed");
+                return PurchaseResult.failure("The purchase needs administrator review.");
             }
+            platform.orders().transition(order.id(), OrderState.REFUNDED,
+                    "Inventory changed during fulfillment; transaction rolled back");
+            return PurchaseResult.failure("Your inventory changed during the purchase. Your Obols were returned.");
+        }
 
-            if (!platform.currency().withdraw(buyer.getUniqueId(), total)) {
-                restore(stock, template, itemCount, block);
-                platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Buyer has insufficient Obols");
-                return PurchaseResult.failure("You do not have enough Obols.");
+        platform.orders().transition(order.id(), OrderState.COMPLETED, "Items delivered");
+        notifyPrincipalSale(principal, shop, itemCount, total);
+        return PurchaseResult.purchase(itemCount, total, shop.itemLabel(), principal.displayName());
+    }
+
+    private PurchaseResult sellToShop(
+            Player seller, ShopRecord shop, ShopPrincipal principal, int itemCount, long total, int units)
+            throws SQLException {
+        ItemStack template = displayItem(shop);
+        if (countSimilar(seller.getInventory(), template) < itemCount) {
+            return PurchaseResult.failure("You do not have " + itemCount + " " + shop.itemLabel() + " to sell.");
+        }
+
+        Block stockBlock = null;
+        Inventory stock = null;
+        if (!shop.unlimitedStock()) {
+            stockBlock = stockBlockFor(shop);
+            if (stockBlock == null || !(stockBlock.getState() instanceof Container container)) {
+                return PurchaseResult.failure(shop.signShop()
+                        ? "That buyback shop is not connected to a receiving container."
+                        : "The shop container is missing.");
             }
-
-            if (!creditPrincipal(principal, total)) {
-                boolean refunded = platform.currency().deposit(buyer.getUniqueId(), total);
-                restore(stock, template, itemCount, block);
-                platform.orders().transition(order.id(),
-                        refunded ? OrderState.PAYMENT_FAILED : OrderState.FULFILLMENT_FAILED,
-                        refunded
-                                ? "Seller payment failed and buyer refunded"
-                                : "Seller payment failed and buyer refund requires admin review");
-                return PurchaseResult.failure(refunded
-                        ? "The seller could not be paid. Your Obols were returned."
-                        : "The purchase needs administrator review.");
+            stock = container.getInventory();
+            if (!hasSpace(stock, template, itemCount)) {
+                return PurchaseResult.failure("That shop's receiving container is full.");
             }
+        }
 
-            platform.orders().transition(order.id(), OrderState.PAID, "Shop payment completed");
-            platform.orders().transition(order.id(), OrderState.FULFILLING, "Delivering purchased items");
+        GardenOrder order = order(seller, shop, principal, total, units, itemCount, "BUYBACK");
+        platform.orders().transition(order.id(), OrderState.READY, "Seller items and receiving stock validated");
+        platform.orders().transition(order.id(), OrderState.AWAITING_CONFIRMATION, "Shop interaction confirms sale");
+        platform.orders().transition(order.id(), OrderState.PAYMENT_PENDING, "Collecting shop owner payout");
 
-            int buyerItemCountBefore = countSimilar(buyer.getInventory(), template);
-            List<ItemStack> delivery = stacks(template, itemCount);
-            Map<Integer, ItemStack> leftovers = buyer.getInventory().addItem(delivery.toArray(ItemStack[]::new));
+        if (!removeSimilar(seller.getInventory(), template, itemCount)) {
+            platform.orders().transition(order.id(), OrderState.CANCELLED, "Seller inventory changed");
+            return PurchaseResult.failure("Your inventory changed. Try again.");
+        }
+
+        if (!debitPrincipal(principal, total)) {
+            restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
+            platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Shop owner has insufficient Obols");
+            return PurchaseResult.failure("That shop does not currently have enough Obols to buy your items.");
+        }
+
+        if (!platform.currency().deposit(seller.getUniqueId(), total)) {
+            creditPrincipal(principal, total);
+            restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
+            platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Seller payout failed and shop funds restored");
+            return PurchaseResult.failure("Your payout could not be completed. Your items were returned.");
+        }
+
+        if (stock != null) {
+            Map<Integer, ItemStack> leftovers = stock.addItem(stacks(template, itemCount).toArray(ItemStack[]::new));
             if (!leftovers.isEmpty()) {
-                int buyerItemCountAfter = countSimilar(buyer.getInventory(), template);
-                int deliveredCount = Math.max(0, buyerItemCountAfter - buyerItemCountBefore);
-                if (deliveredCount > 0) {
-                    removeSimilar(buyer.getInventory(), template, deliveredCount);
-                }
-                restore(stock, template, itemCount, block);
-
-                if (!debitPrincipal(principal, total)) {
-                    platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
-                            "Inventory changed; seller payout could not be reversed and needs admin review");
-                    return PurchaseResult.failure("The purchase needs administrator review.");
-                }
-                if (!platform.currency().deposit(buyer.getUniqueId(), total)) {
+                removeSimilar(stock, template, itemCount - leftovers.values().stream().mapToInt(ItemStack::getAmount).sum());
+                if (platform.currency().withdraw(seller.getUniqueId(), total)) {
                     creditPrincipal(principal, total);
-                    platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
-                            "Inventory changed; buyer refund failed and seller payout was restored");
-                    return PurchaseResult.failure("The purchase needs administrator review.");
                 }
-
-                platform.orders().transition(order.id(), OrderState.REFUNDED,
-                        "Inventory changed during fulfillment; transaction rolled back");
-                return PurchaseResult.failure("Your inventory changed during the purchase. Your Obols were returned.");
+                restore(seller.getInventory(), template, itemCount, seller.getLocation().getBlock());
+                platform.orders().transition(order.id(), OrderState.FULFILLMENT_FAILED,
+                        "Receiving container changed during buyback; transaction rolled back");
+                return PurchaseResult.failure("The receiving container changed. Your items were returned.");
             }
+        }
 
-            platform.orders().transition(order.id(), OrderState.COMPLETED, "Items delivered");
+        platform.orders().transition(order.id(), OrderState.PAID, "Seller payout completed");
+        platform.orders().transition(order.id(), OrderState.FULFILLING,
+                stock == null ? "Items accepted by unlimited shop" : "Items stored in receiving container");
+        platform.orders().transition(order.id(), OrderState.COMPLETED, "Buyback completed");
+        notifyPrincipalBuyback(principal, shop, itemCount, total);
+        return PurchaseResult.sale(itemCount, total, shop.itemLabel(), principal.displayName());
+    }
 
-            if (principal.player()) {
-                Player seller = Bukkit.getPlayer(principal.id());
-                if (seller != null && seller.isOnline()) {
-                    GardenMessages.send(seller,
-                            "Shop sale: " + itemCount + " " + shop.itemLabel() + " for "
-                                    + platform.currency().symbol() + " " + total + ".");
-                }
-            }
+    private GardenOrder order(
+            Player customer, ShopRecord shop, ShopPrincipal principal,
+            long total, int units, int itemCount, String mode) throws SQLException {
+        return platform.orders().create(
+                OrderType.SHOP_PURCHASE,
+                customer.getUniqueId(),
+                principal.kind(),
+                principal.id().toString(),
+                total,
+                "gardentrade.shop",
+                shop.id().toString(),
+                "{\"mode\":\"" + mode + "\",\"units\":" + units
+                        + ",\"itemCount\":" + itemCount
+                        + ",\"item\":\"" + json(shop.itemLabel())
+                        + "\",\"shopOwner\":\"" + json(principal.displayName()) + "\"}"
+        );
+    }
 
-            return PurchaseResult.success(itemCount, total, shop.itemLabel(), principal.displayName());
+    private void notifyPrincipalSale(ShopPrincipal principal, ShopRecord shop, int itemCount, long total) {
+        if (!principal.player()) return;
+        Player owner = Bukkit.getPlayer(principal.id());
+        if (owner != null && owner.isOnline()) {
+            GardenMessages.send(owner, "Shop sale: " + itemCount + " " + shop.itemLabel()
+                    + " for " + platform.currency().symbol() + " " + total + ".");
+        }
+    }
+
+    private void notifyPrincipalBuyback(ShopPrincipal principal, ShopRecord shop, int itemCount, long total) {
+        if (!principal.player()) return;
+        Player owner = Bukkit.getPlayer(principal.id());
+        if (owner != null && owner.isOnline()) {
+            GardenMessages.send(owner, "Shop buyback: paid " + platform.currency().symbol() + " " + total
+                    + " for " + itemCount + " " + shop.itemLabel() + ".");
         }
     }
 
@@ -508,8 +890,7 @@ public final class ShopService {
 
         try (Connection connection = platform.storage().connection();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT COUNT(*) AS n FROM gt_shop_principals "
-                             + "WHERE principal_kind = ? AND principal_id = ?")) {
+                     "SELECT COUNT(*) AS n FROM gt_shop_principals WHERE principal_kind = ? AND principal_id = ?")) {
             statement.setString(1, principal.kind());
             statement.setString(2, principal.id().toString());
             try (ResultSet result = statement.executeQuery()) {
@@ -519,34 +900,20 @@ public final class ShopService {
     }
 
     private boolean canManage(Player actor, ShopRecord shop, ShopPrincipal principal) {
-        if (actor.hasPermission("gardentrade.shop.admin")) {
-            return true;
-        }
-        if (principal.player()) {
-            return principal.id().equals(actor.getUniqueId());
-        }
+        if (actor.hasPermission("gardentrade.shop.admin")) return true;
+        if (principal.player()) return principal.id().equals(actor.getUniqueId());
         return organizations != null
                 && organizations.has(principal.id(), actor.getUniqueId(), OrganizationCapability.COMMERCE_MANAGE);
     }
 
     private boolean creditPrincipal(ShopPrincipal principal, long amount) throws SQLException {
-        if (principal.player()) {
-            return platform.currency().deposit(principal.id(), amount);
-        }
+        if (principal.player()) return platform.currency().deposit(principal.id(), amount);
         return organizations != null && organizations.creditTreasury(principal.id(), amount);
     }
 
     private boolean debitPrincipal(ShopPrincipal principal, long amount) throws SQLException {
-        if (principal.player()) {
-            return platform.currency().withdraw(principal.id(), amount);
-        }
+        if (principal.player()) return platform.currency().withdraw(principal.id(), amount);
         return organizations != null && organizations.debitTreasury(principal.id(), amount);
-    }
-
-    private Block block(ShopRecord shop) {
-        World world = Bukkit.getWorld(shop.worldId());
-        if (world == null) world = Bukkit.getWorld(shop.worldName());
-        return world == null ? null : world.getBlockAt(shop.x(), shop.y(), shop.z());
     }
 
     private int countSimilar(Inventory inventory, ItemStack template) {
@@ -594,9 +961,12 @@ public final class ShopService {
         return result;
     }
 
-    private void restore(Inventory inventory, ItemStack template, int amount, Block block) {
+    private void restore(Inventory inventory, ItemStack template, int amount, Block fallback) {
         Map<Integer, ItemStack> leftovers = inventory.addItem(stacks(template, amount).toArray(ItemStack[]::new));
-        leftovers.values().forEach(item -> block.getWorld().dropItemNaturally(block.getLocation(), item));
+        if (fallback != null) {
+            leftovers.values().forEach(item ->
+                    fallback.getWorld().dropItemNaturally(fallback.getLocation().add(0.5, 0.5, 0.5), item));
+        }
     }
 
     private String serialize(ItemStack item) {
@@ -621,6 +991,10 @@ public final class ShopService {
     }
 
     private ShopRecord read(ResultSet result) throws SQLException {
+        String stockWorldRaw = result.getString("stock_world_uuid");
+        Object stockX = result.getObject("stock_x");
+        Object stockY = result.getObject("stock_y");
+        Object stockZ = result.getObject("stock_z");
         return new ShopRecord(
                 UUID.fromString(result.getString("shop_uuid")),
                 UUID.fromString(result.getString("owner_uuid")),
@@ -634,6 +1008,15 @@ public final class ShopService {
                 result.getString("item_label"),
                 result.getInt("quantity"),
                 result.getLong("price"),
+                result.getString("shop_kind"),
+                result.getString("transaction_mode"),
+                result.getInt("unlimited_stock") != 0,
+                stockWorldRaw == null ? null : UUID.fromString(stockWorldRaw),
+                result.getString("stock_world_name"),
+                stockX == null ? null : result.getInt("stock_x"),
+                stockY == null ? null : result.getInt("stock_y"),
+                stockZ == null ? null : result.getInt("stock_z"),
+                result.getString("visual_style"),
                 result.getInt("enabled") != 0,
                 result.getLong("created_at")
         );
@@ -659,10 +1042,26 @@ public final class ShopService {
         return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    public record LinkResult(boolean handled, boolean success, String message) {
+        public static LinkResult notPending() {
+            return new LinkResult(false, false, "");
+        }
+
+        public static LinkResult handled(boolean success, String message) {
+            return new LinkResult(true, success, message);
+        }
+    }
+
     public record PurchaseResult(boolean success, String message, int itemCount, long total) {
-        public static PurchaseResult success(int itemCount, long total, String item, String seller) {
+        public static PurchaseResult purchase(int itemCount, long total, String item, String seller) {
             return new PurchaseResult(true,
                     "Purchased " + itemCount + " " + item + " from " + seller
+                            + " for ⟡ " + total + ".", itemCount, total);
+        }
+
+        public static PurchaseResult sale(int itemCount, long total, String item, String buyer) {
+            return new PurchaseResult(true,
+                    "Sold " + itemCount + " " + item + " to " + buyer
                             + " for ⟡ " + total + ".", itemCount, total);
         }
 
