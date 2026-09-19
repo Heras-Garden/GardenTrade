@@ -710,10 +710,13 @@ public final class ShopService {
         if (!canManage(actor, shop)) {
             throw new IllegalArgumentException("You do not manage this shop.");
         }
-        String normalized = style == null ? "" : style.trim().toUpperCase(java.util.Locale.ROOT);
-        if (normalized.equals("INVISIBLE") || normalized.equals("INVISIBLEFRAME")) normalized = "FRAME";
-        if (normalized.equals("NORMAL") || normalized.equals("NORMALFRAME")) normalized = "FRAME_NORMAL";
-        if (normalized.equals("GLOW") || normalized.equals("GLOWFRAME")) normalized = "FRAME_GLOW";
+        String requestedStyle = style == null ? "" : style.trim().toLowerCase(java.util.Locale.ROOT);
+        String normalized = switch (requestedStyle) {
+            case "invisible", "invisibleframe" -> "FRAME";
+            case "frame", "normal", "normalframe" -> "FRAME_NORMAL";
+            case "glow", "glowframe" -> "FRAME_GLOW";
+            default -> requestedStyle.toUpperCase(java.util.Locale.ROOT);
+        };
         if (!List.of("BOTH", "ITEM", "TEXT", "FRAME", "FRAME_NORMAL", "FRAME_GLOW", "NONE").contains(normalized)) {
             throw new IllegalArgumentException("Appearance must be both, item, text, invisible, frame, glowframe, or none.");
         }

@@ -195,12 +195,20 @@ public final class ShopVisualService {
             return frame.getUniqueId();
         }
         if (existing != null) existing.remove();
-        Class<? extends ItemFrame> type = glow ? GlowItemFrame.class : ItemFrame.class;
-        ItemFrame frame = world.spawn(location, type, created -> {
-            configureFrame(created, shopId, visible, itemLabel);
-            created.setFacingDirection(face, true);
-            created.setItem(item);
-        });
+        ItemFrame frame;
+        if (glow) {
+            frame = world.spawn(location, GlowItemFrame.class, created -> {
+                configureFrame(created, shopId, true, itemLabel);
+                created.setFacingDirection(face, true);
+                created.setItem(item);
+            });
+        } else {
+            frame = world.spawn(location, ItemFrame.class, created -> {
+                configureFrame(created, shopId, visible, itemLabel);
+                created.setFacingDirection(face, true);
+                created.setItem(item);
+            });
+        }
         return frame.getUniqueId();
     }
 
