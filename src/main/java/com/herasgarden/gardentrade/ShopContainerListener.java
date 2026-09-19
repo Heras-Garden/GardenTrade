@@ -30,24 +30,27 @@ public final class ShopContainerListener implements Listener {
         }
 
         Block block = event.getClickedBlock();
-        if (!ShopBlockKey.supported(block)) {
-            return;
-        }
+        if (!ShopBlockKey.supported(block)) return;
 
+        Player player = event.getPlayer();
         try {
-            Optional<ShopRecord> found = shops.shopAt(block);
-            if (found.isEmpty()) {
-                return;
+            if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+                ShopService.LinkResult link = shops.completePendingStockLink(player, block);
+                if (link.handled()) {
+                    event.setCancelled(true);
+                    GardenMessages.send(player, link.message());
+                    visuals.refresh();
+                    return;
+                }
             }
 
-            ShopRecord shop = found.get();
-            Player player = event.getPlayer();
+            Optional<ShopRecord> found = shops.shopAt(block);
+            if (found.isEmpty() || !found.get().containerShop()) return;
 
+            ShopRecord shop = found.get();
             if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
                 event.setCancelled(true);
-                GardenMessages.send(player,
-                        shop.quantity() + " " + shop.itemLabel() + " for ⟡ " + shop.price()
-                                + " per purchase.");
+                GardenMessages.send(player, describe(shop));
                 return;
             }
 
@@ -61,7 +64,13 @@ public final class ShopContainerListener implements Listener {
             visuals.refresh();
         } catch (SQLException exception) {
             event.setCancelled(true);
-            GardenMessages.send(event.getPlayer(), "The shop system could not update right now.");
+            GardenMessages.send(player, "The shop system could not update right now.");
         }
+    }
+
+    private String describe(ShopRecord shop) {
+        String action = shop.buysFromCustomer() ? "Buys " : "Sells ";
+        return action + shop.quantity() + " " + shop.itemLabel() + " for ⟡ "
+                + shop.price() + " per transaction.";
     }
 }
