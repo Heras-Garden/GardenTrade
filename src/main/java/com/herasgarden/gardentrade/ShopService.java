@@ -22,6 +22,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.sql.Connection;
@@ -144,6 +146,17 @@ public final class ShopService {
                 KIND_SIGN, buyback ? MODE_BUY : MODE_SELL, unlimited, null);
     }
 
+    public ShopRecord createAdminSign(
+            Player actor, Block signBlock, ItemStack template, int quantity, long price, boolean buyback)
+            throws SQLException {
+        if (!actor.hasPermission("gardentrade.shop.admin")) {
+            throw new IllegalArgumentException("Only administrators can create admin shops.");
+        }
+        ShopPrincipal principal = new ShopPrincipal("SERVER", new UUID(0L, 0L), "Server");
+        return createShop(actor, signBlock, template, quantity, price, principal,
+                KIND_SIGN, buyback ? MODE_BUY : MODE_SELL, true, null);
+    }
+
     public ShopRecord createCompanySign(
             Player actor,
             String companyName,
@@ -243,7 +256,7 @@ public final class ShopService {
         ItemStack one = template.clone();
         one.setAmount(1);
         String itemData = serialize(one);
-        String label = pretty(one.getType());
+        String label = labelFor(one);
         UUID id = UUID.randomUUID();
         long now = System.currentTimeMillis();
 
@@ -659,6 +672,24 @@ public final class ShopService {
         return find(shop.id()).orElseThrow();
     }
 
+    public ShopRecord setItem(Player actor, ShopRecord requested, ItemStack template) throws SQLException {
+        ShopRecord shop = find(requested.id())
+                .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
+        if (!canManage(actor, shop)) throw new IllegalArgumentException("You do not manage this shop.");
+        if (template == null || template.getType().isAir()) throw new IllegalArgumentException("Hold the shop item first.");
+        ItemStack one = template.clone();
+        one.setAmount(1);
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE gt_shops SET item_data = ?, item_label = ? WHERE shop_uuid = ?")) {
+            statement.setString(1, serialize(one));
+            statement.setString(2, labelFor(one));
+            statement.setString(3, shop.id().toString());
+            statement.executeUpdate();
+        }
+        return find(shop.id()).orElseThrow();
+    }
+
     public ShopRecord setEnabled(Player actor, ShopRecord requested, boolean enabled) throws SQLException {
         ShopRecord shop = find(requested.id())
                 .orElseThrow(() -> new IllegalArgumentException("That shop no longer exists."));
@@ -680,11 +711,14 @@ public final class ShopService {
             throw new IllegalArgumentException("You do not manage this shop.");
         }
         String normalized = style == null ? "" : style.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!List.of("BOTH", "ITEM", "TEXT", "FRAME", "NONE").contains(normalized)) {
-            throw new IllegalArgumentException("Appearance must be both, item, text, frame, or none.");
+        if (normalized.equals("INVISIBLE") || normalized.equals("INVISIBLEFRAME")) normalized = "FRAME";
+        if (normalized.equals("NORMAL") || normalized.equals("NORMALFRAME")) normalized = "FRAME_NORMAL";
+        if (normalized.equals("GLOW") || normalized.equals("GLOWFRAME")) normalized = "FRAME_GLOW";
+        if (!List.of("BOTH", "ITEM", "TEXT", "FRAME", "FRAME_NORMAL", "FRAME_GLOW", "NONE").contains(normalized)) {
+            throw new IllegalArgumentException("Appearance must be both, item, text, invisible, frame, glowframe, or none.");
         }
-        if ("FRAME".equals(normalized) && !shop.containerShop()) {
-            throw new IllegalArgumentException("Invisible item-frame displays are only available for container shops.");
+        if (normalized.startsWith("FRAME") && !shop.containerShop()) {
+            throw new IllegalArgumentException("Item-frame displays are only available for container shops.");
         }
         try (Connection connection = platform.storage().connection();
              PreparedStatement statement = connection.prepareStatement(
@@ -985,17 +1019,20 @@ public final class ShopService {
 
     private boolean canManage(Player actor, ShopRecord shop, ShopPrincipal principal) {
         if (actor.hasPermission("gardentrade.shop.admin")) return true;
+        if (principal.server()) return false;
         if (principal.player()) return principal.id().equals(actor.getUniqueId());
         return organizations != null
                 && organizations.has(principal.id(), actor.getUniqueId(), OrganizationCapability.COMMERCE_MANAGE);
     }
 
     private boolean creditPrincipal(ShopPrincipal principal, long amount) throws SQLException {
+        if (principal.server()) return true;
         if (principal.player()) return platform.currency().deposit(principal.id(), amount);
         return organizations != null && organizations.creditTreasury(principal.id(), amount);
     }
 
     private boolean debitPrincipal(ShopPrincipal principal, long amount) throws SQLException {
+        if (principal.server()) return true;
         if (principal.player()) return platform.currency().withdraw(principal.id(), amount);
         return organizations != null && organizations.debitTreasury(principal.id(), amount);
     }
@@ -1104,6 +1141,15 @@ public final class ShopService {
                 result.getInt("enabled") != 0,
                 result.getLong("created_at")
         );
+    }
+
+    private String labelFor(ItemStack item) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null && meta.hasDisplayName() && meta.displayName() != null) {
+            String custom = PlainTextComponentSerializer.plainText().serialize(meta.displayName()).trim();
+            if (!custom.isBlank()) return custom;
+        }
+        return pretty(item.getType());
     }
 
     private String pretty(Material material) {

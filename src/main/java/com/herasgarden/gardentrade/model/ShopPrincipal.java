@@ -14,4 +14,8 @@ public record ShopPrincipal(
     public boolean player() {
         return "PLAYER".equals(kind);
     }
+
+    public boolean server() {
+        return "SERVER".equals(kind);
+    }
 }

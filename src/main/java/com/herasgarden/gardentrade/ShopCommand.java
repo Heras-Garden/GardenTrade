@@ -305,7 +305,11 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                 .append(Component.space())
                 .append(button("[Text]", "/shop appearance text", "Show only the shop text"))
                 .append(Component.space())
-                .append(button("[Frame]", "/shop appearance frame", "Show the item in an invisible locked frame with only its price underneath"))
+                .append(button("[Invisible Frame]", "/shop appearance invisible", "Show the item in an invisible locked frame"))
+                .append(Component.space())
+                .append(button("[Frame]", "/shop appearance frame", "Show the item in a normal frame"))
+                .append(Component.space())
+                .append(button("[Glow Frame]", "/shop appearance glowframe", "Show the item in a glowing frame"))
                 .append(Component.space())
                 .append(button("[None]", "/shop appearance none", "Delete all visual entities for this shop"));
         player.sendMessage(appearance);
@@ -345,7 +349,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
 
     private boolean appearance(Player player, String[] args) throws SQLException {
         if (args.length != 2) {
-            send(player, "Use /shop appearance <both|item|text|frame|none>.");
+            send(player, "Use /shop appearance <both|item|text|invisible|frame|glowframe|none>.");
             return true;
         }
         ShopRecord shop = managedTargetShop(player);
@@ -423,6 +427,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
         shops.delete(shop.id());
+        visuals.removeShopVisuals(shop.id());
         visuals.refresh();
         send(player, "Shop deleted.");
         return true;
@@ -540,7 +545,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                     .filter(value -> value.startsWith(prefix)).toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("appearance")) {
-            return List.of("both", "item", "text", "frame", "none");
+            return List.of("both", "item", "text", "invisible", "frame", "glowframe", "none");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("mode")) {
             return List.of("sell", "buy");

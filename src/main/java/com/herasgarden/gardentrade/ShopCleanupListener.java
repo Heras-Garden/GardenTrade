@@ -12,9 +12,11 @@ import java.util.Optional;
 
 public final class ShopCleanupListener implements Listener {
     private final ShopService shops;
+    private final ShopVisualService visuals;
 
-    public ShopCleanupListener(ShopService shops) {
+    public ShopCleanupListener(ShopService shops, ShopVisualService visuals) {
         this.shops = shops;
+        this.visuals = visuals;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -23,6 +25,7 @@ public final class ShopCleanupListener implements Listener {
             Optional<ShopRecord> storefront = shops.shopAt(event.getBlock());
             if (storefront.isPresent()) {
                 shops.delete(storefront.get().id());
+                visuals.removeShopVisuals(storefront.get().id());
             }
 
             if (!ShopBlockKey.supported(event.getBlock())) return;

@@ -9,12 +9,14 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.Sign;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.ItemFrame;
+import org.bukkit.entity.GlowItemFrame;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
@@ -149,16 +151,18 @@ public final class ShopVisualService {
         ItemStack item = warning ? new ItemStack(Material.BARRIER) : shops.displayItem(shop);
 
         boolean container = shop.containerShop();
-        boolean showFrame = container && ("FRAME".equals(style) || "BOTH".equals(style));
+        boolean frameStyle = style.equals("FRAME") || style.equals("FRAME_NORMAL") || style.equals("FRAME_GLOW");
+        boolean showFrame = container && (frameStyle || "BOTH".equals(style));
         boolean showItem = "ITEM".equals(style) || "BOTH".equals(style);
-        boolean showText = "TEXT".equals(style) || "BOTH".equals(style) || "FRAME".equals(style);
+        boolean showText = "TEXT".equals(style) || "BOTH".equals(style) || frameStyle;
+        if (shop.signShop()) syncSignStatus(shop, block, soldOut, cannotReceive);
 
         BlockFace face = displayFace(block);
         Location frameLocation = frameLocation(block, face);
         Location itemLocation = block.getLocation().add(0.5, shop.signShop() ? 1.0 : 1.3, 0.5);
         Location textLocation;
         Component text;
-        if ("FRAME".equals(style) && container) {
+        if (frameStyle && container) {
             textLocation = frameLocation.clone().add(face.getDirection().multiply(0.08)).add(0.0, -0.40, 0.0);
             text = compactFrameLabel(shop, soldOut, cannotReceive);
         } else {
@@ -167,7 +171,7 @@ public final class ShopVisualService {
         }
 
         VisualSet set = visuals.computeIfAbsent(shop.id(), ignored -> new VisualSet());
-        set.frame = syncFrame(set.frame, shop.id(), block.getWorld(), frameLocation, face, item, showFrame);
+        set.frame = syncFrame(set.frame, shop.id(), block.getWorld(), frameLocation, face, item, showFrame, style, shop.itemLabel());
         set.item = syncItem(set.item, shop.id(), block.getWorld(), itemLocation, item, showItem);
         set.text = syncText(set.text, shop.id(), block.getWorld(), textLocation, text, showText);
 
@@ -175,22 +179,25 @@ public final class ShopVisualService {
     }
 
     private UUID syncFrame(UUID entityId, UUID shopId, World world, Location location, BlockFace face,
-                           ItemStack item, boolean show) {
+                           ItemStack item, boolean show, String style, String itemLabel) {
         Entity existing = entity(entityId);
         if (!show) {
             if (existing != null) existing.remove();
             return null;
         }
-        if (existing instanceof ItemFrame frame) {
+        boolean glow = "FRAME_GLOW".equals(style);
+        boolean visible = "FRAME_NORMAL".equals(style) || glow;
+        if (existing instanceof ItemFrame frame && (glow == (frame instanceof GlowItemFrame))) {
             frame.teleport(location);
             frame.setFacingDirection(face, true);
             frame.setItem(item);
-            configureFrame(frame, shopId);
+            configureFrame(frame, shopId, visible, itemLabel);
             return frame.getUniqueId();
         }
         if (existing != null) existing.remove();
-        ItemFrame frame = world.spawn(location, ItemFrame.class, created -> {
-            configureFrame(created, shopId);
+        Class<? extends ItemFrame> type = glow ? GlowItemFrame.class : ItemFrame.class;
+        ItemFrame frame = world.spawn(location, type, created -> {
+            configureFrame(created, shopId, visible, itemLabel);
             created.setFacingDirection(face, true);
             created.setItem(item);
         });
@@ -242,9 +249,11 @@ public final class ShopVisualService {
         return display.getUniqueId();
     }
 
-    private void configureFrame(ItemFrame frame, UUID shopId) {
+    private void configureFrame(ItemFrame frame, UUID shopId, boolean visible, String itemLabel) {
         tag(frame, shopId, "frame");
-        frame.setVisible(false);
+        frame.setVisible(visible);
+        frame.customName(Component.text(itemLabel));
+        frame.setCustomNameVisible(false);
         frame.setFixed(true);
         frame.setInvulnerable(true);
         frame.setPersistent(true);
@@ -282,6 +291,25 @@ public final class ShopVisualService {
             }
         }
         visuals.clear();
+    }
+
+    public void removeShopVisuals(UUID shopId) {
+        removeVisuals(shopId);
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntities()) {
+                String tagged = entity.getPersistentDataContainer().get(shopKey, PersistentDataType.STRING);
+                if (shopId.toString().equals(tagged)) entity.remove();
+            }
+        }
+    }
+
+    private void syncSignStatus(ShopRecord shop, Block block, boolean soldOut, boolean cannotReceive) {
+        if (!(block.getState() instanceof Sign sign)) return;
+        String line = soldOut ? "SOLD OUT" : cannotReceive ? "FULL" : shop.itemLabel();
+        if (!line.equals(sign.getLine(3))) {
+            sign.setLine(3, line);
+            sign.update(true, false);
+        }
     }
 
     private Component compactFrameLabel(ShopRecord shop, boolean soldOut, boolean cannotReceive) {

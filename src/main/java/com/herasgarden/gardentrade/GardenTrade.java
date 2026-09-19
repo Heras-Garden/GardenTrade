@@ -69,7 +69,7 @@ public final class GardenTrade extends JavaPlugin {
             shop.setTabCompleter(shopCommand);
         }
 
-        getServer().getPluginManager().registerEvents(new ShopCleanupListener(shops), this);
+        getServer().getPluginManager().registerEvents(new ShopCleanupListener(shops, visuals), this);
         getServer().getPluginManager().registerEvents(
                 new ShopSignListener(this, shops, visuals, claimBlocks, maxPlayerShops), this);
         getServer().getPluginManager().registerEvents(
