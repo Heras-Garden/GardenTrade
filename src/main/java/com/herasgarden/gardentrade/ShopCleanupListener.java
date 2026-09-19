@@ -23,7 +23,6 @@ public final class ShopCleanupListener implements Listener {
             Optional<ShopRecord> storefront = shops.shopAt(event.getBlock());
             if (storefront.isPresent()) {
                 shops.delete(storefront.get().id());
-                return;
             }
 
             if (!ShopBlockKey.supported(event.getBlock())) return;
