@@ -299,15 +299,15 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(row);
 
         Component appearance = GardenMessages.prefix()
-                .append(button("[Both]", "/shop appearance both", "Show item and text"))
+                .append(button("[Both]", "/shop appearance both", "Container shop: frame + hovering item + text"))
                 .append(Component.space())
-                .append(button("[Item]", "/shop appearance item", "Show only the item"))
+                .append(button("[Item]", "/shop appearance item", "Show only the hovering item"))
                 .append(Component.space())
-                .append(button("[Text]", "/shop appearance text", "Show only text"))
+                .append(button("[Text]", "/shop appearance text", "Show only the shop text"))
                 .append(Component.space())
-                .append(button("[Frame]", "/shop appearance frame", "Use an invisible locked item frame on the container with compact text"))
+                .append(button("[Frame]", "/shop appearance frame", "Show the item in an invisible locked frame with only its price underneath"))
                 .append(Component.space())
-                .append(button("[None]", "/shop appearance none", "Hide normal shop holograms"));
+                .append(button("[None]", "/shop appearance none", "Delete all visual entities for this shop"));
         player.sendMessage(appearance);
 
         if (shop.signShop() && !shop.unlimitedStock()) {

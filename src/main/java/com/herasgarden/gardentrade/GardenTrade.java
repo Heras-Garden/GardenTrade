@@ -1,6 +1,7 @@
 package com.herasgarden.gardentrade;
 
 import com.herasgarden.gardencore.api.GardenPlatform;
+import com.herasgarden.gardencore.api.claim.ClaimBlockService;
 import com.herasgarden.gardencore.api.land.LandAccessService;
 import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
 import com.herasgarden.gardentrade.storage.TradeSchema;
@@ -45,6 +46,10 @@ public final class GardenTrade extends JavaPlugin {
         }
         OrganizationDirectory organizations = organizationRegistration.getProvider();
 
+        RegisteredServiceProvider<ClaimBlockService> claimBlockRegistration =
+                getServer().getServicesManager().getRegistration(ClaimBlockService.class);
+        ClaimBlockService claimBlocks = claimBlockRegistration == null ? null : claimBlockRegistration.getProvider();
+
         ShopService shops = new ShopService(this, platform, land, organizations);
         int maxPlayerShops = getConfig().getInt("shops.max-per-player", 15);
         ShopVisualService visuals = new ShopVisualService(this, shops);
@@ -66,9 +71,11 @@ public final class GardenTrade extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new ShopCleanupListener(shops), this);
         getServer().getPluginManager().registerEvents(
-                new ShopSignListener(this, shops, visuals, maxPlayerShops), this);
+                new ShopSignListener(this, shops, visuals, claimBlocks, maxPlayerShops), this);
         getServer().getPluginManager().registerEvents(
                 new ShopContainerListener(shops, visuals), this);
+        getServer().getPluginManager().registerEvents(
+                new ShopStockListener(visuals), this);
         getServer().getPluginManager().registerEvents(
                 new ShopVisualProtectionListener(visuals), this);
         getLogger().info("GardenTrade enabled. Stocked chest shops, linked sign shops, buybacks, and protected shop visuals are active.");

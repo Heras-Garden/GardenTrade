@@ -39,7 +39,7 @@ public final class ShopContainerListener implements Listener {
                 if (link.handled()) {
                     event.setCancelled(true);
                     GardenMessages.send(player, link.message());
-                    visuals.refresh();
+                    visuals.refresh(shop.id());
                     return;
                 }
             }
