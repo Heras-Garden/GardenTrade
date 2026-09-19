@@ -50,7 +50,7 @@ public final class ShopVisualService {
     public void start() {
         cleanupTaggedEntities();
         refresh();
-        maintenanceTask = Bukkit.getScheduler().runTaskTimer(plugin, this::refresh, 1200L, 1200L);
+        maintenanceTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> refresh(), 1200L, 1200L);
     }
 
     public void stop() {
