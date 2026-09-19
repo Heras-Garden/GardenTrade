@@ -19,6 +19,7 @@ import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.GlowItemFrame;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -147,8 +148,7 @@ public final class ShopVisualService {
 
         boolean soldOut = shops.isSoldOut(shop);
         boolean cannotReceive = shop.buysFromCustomer() && !shops.canAcceptBuyback(shop);
-        boolean warning = soldOut || cannotReceive;
-        ItemStack item = warning ? new ItemStack(Material.BARRIER) : shops.displayItem(shop);
+        ItemStack item = shops.displayItem(shop);
 
         boolean container = shop.containerShop();
         boolean frameStyle = style.equals("FRAME") || style.equals("FRAME_NORMAL") || style.equals("FRAME_GLOW");
@@ -171,11 +171,22 @@ public final class ShopVisualService {
         }
 
         VisualSet set = visuals.computeIfAbsent(shop.id(), ignored -> new VisualSet());
-        set.frame = syncFrame(set.frame, shop.id(), block.getWorld(), frameLocation, face, item, showFrame, style, shop.itemLabel());
+        set.frame = syncFrame(set.frame, shop.id(), block.getWorld(), frameLocation, face,
+                frameItem(item, shop.itemLabel()), showFrame, style, shop.itemLabel());
         set.item = syncItem(set.item, shop.id(), block.getWorld(), itemLocation, item, showItem);
         set.text = syncText(set.text, shop.id(), block.getWorld(), textLocation, text, showText);
 
         if (set.empty()) visuals.remove(shop.id());
+    }
+
+    private ItemStack frameItem(ItemStack original, String itemLabel) {
+        ItemStack display = original.clone();
+        ItemMeta meta = display.getItemMeta();
+        if (meta != null && meta.displayName() == null) {
+            meta.displayName(Component.text(itemLabel));
+            display.setItemMeta(meta);
+        }
+        return display;
     }
 
     private UUID syncFrame(UUID entityId, UUID shopId, World world, Location location, BlockFace face,
