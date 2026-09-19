@@ -7,6 +7,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
 
 public final class ShopCleanupListener implements Listener {
@@ -18,16 +19,20 @@ public final class ShopCleanupListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        if (!ShopBlockKey.supported(event.getBlock())) return;
-
         try {
-            Optional<ShopRecord> shop = shops.shopAt(event.getBlock());
-            if (shop.isPresent()) {
-                shops.delete(shop.get().id());
+            Optional<ShopRecord> storefront = shops.shopAt(event.getBlock());
+            if (storefront.isPresent()) {
+                shops.delete(storefront.get().id());
+                return;
+            }
+
+            if (!ShopBlockKey.supported(event.getBlock())) return;
+            List<ShopRecord> linked = shops.shopsUsingStock(event.getBlock());
+            for (ShopRecord shop : linked) {
+                if (shop.signShop()) shops.unlinkStockBecauseBroken(shop.id());
             }
         } catch (SQLException exception) {
-            // If cleanup cannot be persisted, canceling this late is unsafe.
-            // The stale shop will fail purchases because its container is gone.
+            // A missing storefront or stock container makes future transactions fail safely.
         }
     }
 }
