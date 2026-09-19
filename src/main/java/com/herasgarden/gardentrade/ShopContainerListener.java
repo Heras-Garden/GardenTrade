@@ -39,7 +39,7 @@ public final class ShopContainerListener implements Listener {
                 if (link.handled()) {
                     event.setCancelled(true);
                     GardenMessages.send(player, link.message());
-                    visuals.refresh(shop.id());
+                    visuals.refresh();
                     return;
                 }
             }
@@ -61,7 +61,7 @@ public final class ShopContainerListener implements Listener {
             event.setCancelled(true);
             ShopService.PurchaseResult result = shops.purchase(player, shop, 1);
             GardenMessages.send(player, result.message());
-            visuals.refresh();
+            visuals.refresh(shop.id());
         } catch (SQLException exception) {
             event.setCancelled(true);
             GardenMessages.send(player, "The shop system could not update right now.");
