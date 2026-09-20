@@ -154,7 +154,7 @@ public final class ShopVisualService {
         boolean frameStyle = style.equals("FRAME") || style.equals("FRAME_NORMAL") || style.equals("FRAME_GLOW");
         boolean showFrame = container && (frameStyle || "BOTH".equals(style));
         boolean showItem = "ITEM".equals(style) || "BOTH".equals(style);
-        boolean showText = "TEXT".equals(style) || "BOTH".equals(style) || frameStyle;
+        boolean showText = "TEXT".equals(style) || "BOTH".equals(style);
         if (shop.signShop()) syncSignStatus(shop, block, soldOut, cannotReceive);
 
         BlockFace face = displayFace(block);

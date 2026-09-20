@@ -259,6 +259,7 @@ public final class ShopService {
         String label = labelFor(one);
         UUID id = UUID.randomUUID();
         long now = System.currentTimeMillis();
+        String initialVisualStyle = containerKind ? "FRAME" : "TEXT";
 
         try (Connection connection = platform.storage().connection()) {
             connection.setAutoCommit(false);
@@ -269,7 +270,7 @@ public final class ShopService {
                                 + "item_data, item_label, quantity, price, shop_kind, transaction_mode, "
                                 + "unlimited_stock, stock_world_uuid, stock_world_name, stock_x, stock_y, stock_z, "
                                 + "visual_style, enabled, created_at) "
-                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOTH', 1, ?)")) {
+                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)")) {
                     statement.setString(1, id.toString());
                     statement.setString(2, actor.getUniqueId().toString());
                     statement.setString(3, actor.getName());
@@ -286,7 +287,8 @@ public final class ShopService {
                     statement.setString(14, transactionMode);
                     statement.setInt(15, unlimited ? 1 : 0);
                     setStock(statement, 16, stock);
-                    statement.setLong(21, now);
+                    statement.setString(21, initialVisualStyle);
+                    statement.setLong(22, now);
                     statement.executeUpdate();
                 }
                 try (PreparedStatement statement = connection.prepareStatement(
