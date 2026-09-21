@@ -83,6 +83,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                 case "disable" -> enabled(player, false);
                 case "unlimited" -> unlimited(player, args);
                 case "delete" -> delete(player);
+                case "cleanup" -> cleanup(player, args);
                 case "list" -> list(player);
                 default -> {
                     help(player);
@@ -433,6 +434,28 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean cleanup(Player player, String[] args) {
+        if (!player.hasPermission("gardentrade.shop.admin")) {
+            send(player, "You do not have permission to clean up shop visuals.");
+            return true;
+        }
+        boolean preview = args.length >= 2 && args[1].equalsIgnoreCase("preview");
+        ShopVisualService.CleanupResult result = visuals.reconcileTaggedEntities(preview);
+        Component card = GardenMessages.statusCard(
+                "SHOP VISUAL CLEANUP",
+                List.of(
+                        Component.text(result.checked() + " visuals checked", GardenMessages.MESSAGE_COLOR),
+                        Component.text(result.orphaned() + (preview ? " orphaned visuals found" : " orphaned visuals removed"), GardenMessages.PETAL_FROST),
+                        Component.text(result.duplicates() + (preview ? " duplicates found" : " duplicates removed"), GardenMessages.PETAL_FROST),
+                        Component.text(result.invalidMetadata() + " invalid GardenTrade metadata", GardenMessages.PETAL_FROST)
+                ),
+                preview ? GardenMessages.action("[Run Cleanup]", "/shop cleanup", "Remove only verified GardenTrade orphan/duplicate visuals", GardenMessages.TUSCAN_SUN) : null
+        );
+        player.sendMessage(card);
+        if (!preview) visuals.refresh();
+        return true;
+    }
+
     private boolean list(Player player) throws SQLException {
         List<ShopRecord> records = shops.ownedBy(player.getUniqueId());
         player.sendMessage(GardenMessages.prefix().append(Component.text("Your shops", NamedTextColor.WHITE)));
@@ -524,6 +547,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         send(player, "/shop create <quantity> <price> or /shop createbuy <quantity> <price> for chest shops.");
         send(player, "For wall/standing signs, use [SignShop], [BuyShop], [AdminShop], or [AdminBuy].");
         send(player, "/shop settings, link, unlink, appearance, setprice, setquantity, mode, enable, disable, delete.");
+        if (player.hasPermission("gardentrade.shop.admin")) send(player, "/shop cleanup preview or /shop cleanup.");
         send(player, "/shop companycreate..., companycreatebuy..., companysign..., and matching government commands are supported.");
     }
 
@@ -541,8 +565,11 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                     "governmentcreate", "governmentcreatebuy", "governmentsign", "governmentlist",
                     "info", "buy", "settings", "link", "unlink", "appearance",
                     "setprice", "setquantity", "mode", "enable", "disable", "unlimited",
-                    "delete", "list").stream()
+                    "delete", "cleanup", "list").stream()
                     .filter(value -> value.startsWith(prefix)).toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("cleanup")) {
+            return "preview".startsWith(args[1].toLowerCase(Locale.ROOT)) ? List.of("preview") : List.of();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("appearance")) {
             return List.of("both", "item", "text", "invisible", "frame", "glowframe", "none");

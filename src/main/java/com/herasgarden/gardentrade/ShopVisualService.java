@@ -51,7 +51,7 @@ public final class ShopVisualService {
     }
 
     public void start() {
-        cleanupTaggedEntities();
+        reconcileTaggedEntities(false);
         refresh();
         maintenanceTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> refresh(), 1200L, 1200L);
     }
@@ -301,15 +301,89 @@ public final class ShopVisualService {
         if (entity != null) entity.remove();
     }
 
-    private void cleanupTaggedEntities() {
+    public CleanupResult reconcileTaggedEntities(boolean preview) {
+        int checked = 0;
+        int orphaned = 0;
+        int duplicates = 0;
+        int invalidMetadata = 0;
+        int removed = 0;
+        Map<UUID, ShopRecord> active = new HashMap<>();
+        try {
+            for (ShopRecord shop : shops.all()) active.put(shop.id(), shop);
+        } catch (SQLException exception) {
+            plugin.getLogger().warning("Could not load shops for visual reconciliation: " + exception.getMessage());
+            return new CleanupResult(0, 0, 0, 0, 0);
+        }
+
+        Map<UUID, Set<String>> keptTypes = new HashMap<>();
+        if (!preview) visuals.clear();
+
         for (World world : Bukkit.getWorlds()) {
             for (Entity entity : world.getEntities()) {
-                if (entity.getPersistentDataContainer().has(shopKey, PersistentDataType.STRING)) {
-                    entity.remove();
+                String tagged = entity.getPersistentDataContainer().get(shopKey, PersistentDataType.STRING);
+                if (tagged == null) continue;
+                checked++;
+
+                UUID shopId;
+                try {
+                    shopId = UUID.fromString(tagged);
+                } catch (IllegalArgumentException exception) {
+                    invalidMetadata++;
+                    if (!preview) {
+                        entity.remove();
+                        removed++;
+                    }
+                    continue;
+                }
+
+                String type = entity.getPersistentDataContainer().get(typeKey, PersistentDataType.STRING);
+                ShopRecord shop = active.get(shopId);
+                Set<String> expected = shop == null || !shop.enabled() ? Set.of() : expectedTypes(shop);
+                String normalized = type == null ? "" : type.toLowerCase();
+                if (!expected.contains(normalized)) {
+                    orphaned++;
+                    if (!preview) {
+                        entity.remove();
+                        removed++;
+                    }
+                    continue;
+                }
+
+                Set<String> kept = keptTypes.computeIfAbsent(shopId, ignored -> new HashSet<>());
+                if (!kept.add(normalized)) {
+                    duplicates++;
+                    if (!preview) {
+                        entity.remove();
+                        removed++;
+                    }
+                    continue;
+                }
+
+                if (!preview) {
+                    VisualSet set = visuals.computeIfAbsent(shopId, ignored -> new VisualSet());
+                    switch (normalized) {
+                        case "frame" -> set.frame = entity.getUniqueId();
+                        case "item" -> set.item = entity.getUniqueId();
+                        case "text" -> set.text = entity.getUniqueId();
+                        default -> {
+                        }
+                    }
                 }
             }
         }
-        visuals.clear();
+        return new CleanupResult(checked, orphaned, duplicates, invalidMetadata, removed);
+    }
+
+    private Set<String> expectedTypes(ShopRecord shop) {
+        String style = shop.visualStyle() == null ? "BOTH" : shop.visualStyle().toUpperCase();
+        if ("NONE".equals(style)) return Set.of();
+
+        Set<String> expected = new HashSet<>();
+        boolean frameStyle = style.equals("FRAME") || style.equals("FRAME_NORMAL") || style.equals("FRAME_GLOW");
+        if (shop.containerShop() && (frameStyle || "BOTH".equals(style))) expected.add("frame");
+        if ("ITEM".equals(style) || "BOTH".equals(style)) expected.add("item");
+        if ("TEXT".equals(style) || "BOTH".equals(style)) expected.add("text");
+        return expected;
     }
 
     public void removeShopVisuals(UUID shopId) {
@@ -366,6 +440,9 @@ public final class ShopVisualService {
     private Location frameLocation(Block block, BlockFace face) {
         Vector offset = face.getDirection().multiply(0.51);
         return block.getLocation().add(0.5, 0.52, 0.5).add(offset);
+    }
+
+    public record CleanupResult(int checked, int orphaned, int duplicates, int invalidMetadata, int removed) {
     }
 
     private static final class VisualSet {

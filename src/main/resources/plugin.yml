@@ -10,7 +10,7 @@ depend: [GardenCore, GardenLands]
 commands:
   shop:
     description: Create and use Garden shops.
-    usage: /shop <create|createbuy|info|buy|settings|link|unlink|appearance|setprice|setquantity|mode|delete|list>
+    usage: /shop <create|createbuy|info|buy|settings|link|unlink|appearance|setprice|setquantity|mode|delete|cleanup|list>
 
 permissions:
   gardentrade.shop:

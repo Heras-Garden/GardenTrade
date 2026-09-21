@@ -34,7 +34,10 @@ public final class ShopCleanupListener implements Listener {
                 if (shop.signShop()) shops.unlinkStockBecauseBroken(shop.id());
             }
         } catch (SQLException exception) {
-            // A missing storefront or stock container makes future transactions fail safely.
+            event.getPlayer().getServer().getLogger().warning(
+                    "GardenTrade cleanup failed at " + event.getBlock().getWorld().getName()
+                            + " " + event.getBlock().getX() + "," + event.getBlock().getY() + ","
+                            + event.getBlock().getZ() + ": " + exception.getMessage());
         }
     }
 }
