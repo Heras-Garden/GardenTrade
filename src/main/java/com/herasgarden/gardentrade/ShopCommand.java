@@ -7,7 +7,6 @@ import com.herasgarden.gardentrade.model.ShopRecord;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
-import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
 import org.bukkit.command.Command;
@@ -247,10 +246,10 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         List<ShopRecord> records = shops.ownedByOrganization(organization.id());
 
         player.sendMessage(GardenMessages.prefix()
-                .append(Component.text(organization.name() + " shops", NamedTextColor.WHITE)));
+                .append(Component.text(organization.name() + " shops", GardenMessages.PETAL_FROST)));
         if (records.isEmpty()) {
             player.sendMessage(Component.text(
-                    "This " + kind + " does not own any Garden shops.", NamedTextColor.WHITE));
+                    "This " + kind + " does not own any Garden shops.", GardenMessages.NEUTRAL_GRAY));
             return true;
         }
         for (ShopRecord shop : records) player.sendMessage(shopRow(shop));
@@ -261,14 +260,14 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = targetShop(player);
         if (shop == null) return true;
         ShopPrincipal principal = shops.principal(shop);
-        player.sendMessage(GardenMessages.prefix().append(Component.text("Shop", NamedTextColor.WHITE)));
-        player.sendMessage(Component.text(summary(shop), NamedTextColor.WHITE));
+        player.sendMessage(GardenMessages.prefix().append(Component.text("Shop", GardenMessages.PETAL_FROST)));
+        player.sendMessage(Component.text(summary(shop), GardenMessages.MESSAGE_COLOR));
         player.sendMessage(Component.text(
                 "Owner: " + principal.displayName()
                         + (principal.organization() ? " (Organization)" : "")
                         + " | ID: " + shortId(shop),
-                NamedTextColor.GRAY));
-        player.sendMessage(Component.text(stockSummary(shop), NamedTextColor.GRAY));
+                GardenMessages.NEUTRAL_GRAY));
+        player.sendMessage(Component.text(stockSummary(shop), GardenMessages.NEUTRAL_GRAY));
         return true;
     }
 
@@ -286,17 +285,22 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
 
-        send(player, "Shop settings: " + shortId(shop) + " | " + summary(shop));
-        send(player, stockSummary(shop));
+        player.sendMessage(GardenMessages.prefix()
+                .append(Component.text("Shop settings", GardenMessages.PETAL_FROST)));
+        player.sendMessage(Component.text(shortId(shop) + " | " + summary(shop), GardenMessages.MESSAGE_COLOR));
+        player.sendMessage(Component.text(stockSummary(shop), GardenMessages.NEUTRAL_GRAY));
+        player.sendMessage(Component.text(
+                "Change values with /shop setprice <obols> and /shop setquantity <amount>.",
+                GardenMessages.NEUTRAL_GRAY));
 
         Component row = GardenMessages.prefix()
                 .append(button("[Sell]", "/shop mode sell", "Shop sells items to customers"))
                 .append(Component.space())
                 .append(button("[Buyback]", "/shop mode buy", "Shop buys items from customers"))
                 .append(Component.space())
-                .append(button("[Enable]", "/shop enable", "Enable transactions"))
+                .append(button("[Enable]", "/shop enable", "Enable transactions", GardenMessages.MUTED_OLIVE))
                 .append(Component.space())
-                .append(button("[Disable]", "/shop disable", "Disable transactions"));
+                .append(button("[Disable]", "/shop disable", "Disable transactions", GardenMessages.BUBBLEGUM_PINK));
         player.sendMessage(row);
 
         Component appearance = GardenMessages.prefix()
@@ -317,17 +321,16 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
 
         if (shop.signShop() && !shop.unlimitedStock()) {
             player.sendMessage(GardenMessages.prefix()
-                    .append(button("[Link Stock]", "/shop link", "Click a container after selecting this"))
+                    .append(button("[Link Stock]", "/shop link", "Click a container after selecting this", GardenMessages.MUTED_OLIVE))
                     .append(Component.space())
                     .append(button("[Unlink Stock]", "/shop unlink", "Remove the connected stock container")));
         }
         if (player.hasPermission("gardentrade.shop.admin")) {
             player.sendMessage(GardenMessages.prefix()
-                    .append(button("[Unlimited On]", "/shop unlimited on", "Ignore physical stock"))
+                    .append(button("[Unlimited On]", "/shop unlimited on", "Ignore physical stock", GardenMessages.MUTED_OLIVE))
                     .append(Component.space())
                     .append(button("[Unlimited Off]", "/shop unlimited off", "Require physical stock")));
         }
-        send(player, "Change values with /shop setprice <obols> and /shop setquantity <amount>.");
         return true;
     }
 
@@ -449,7 +452,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                         Component.text(result.duplicates() + (preview ? " duplicates found" : " duplicates removed"), GardenMessages.PETAL_FROST),
                         Component.text(result.invalidMetadata() + " invalid GardenTrade metadata", GardenMessages.PETAL_FROST)
                 ),
-                preview ? GardenMessages.action("[Run Cleanup]", "/shop cleanup", "Remove only verified GardenTrade orphan/duplicate visuals", GardenMessages.TUSCAN_SUN) : null
+                preview ? GardenMessages.action("[Run Cleanup]", "/shop cleanup", "Remove only verified GardenTrade orphan/duplicate visuals", GardenMessages.MUTED_OLIVE) : null
         );
         player.sendMessage(card);
         if (!preview) visuals.refresh();
@@ -458,9 +461,9 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
 
     private boolean list(Player player) throws SQLException {
         List<ShopRecord> records = shops.ownedBy(player.getUniqueId());
-        player.sendMessage(GardenMessages.prefix().append(Component.text("Your shops", NamedTextColor.WHITE)));
+        player.sendMessage(GardenMessages.prefix().append(Component.text("Your shops", GardenMessages.PETAL_FROST)));
         if (records.isEmpty()) {
-            player.sendMessage(Component.text("You do not own any Garden shops.", NamedTextColor.WHITE));
+            player.sendMessage(Component.text("You do not own any Garden shops.", GardenMessages.NEUTRAL_GRAY));
             return true;
         }
         for (ShopRecord shop : records) player.sendMessage(shopRow(shop));
@@ -530,13 +533,17 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         return Component.text(
                 shortId(shop) + " | " + summary(shop) + " | "
                         + shop.worldName() + " " + shop.x() + "," + shop.y() + "," + shop.z(),
-                NamedTextColor.WHITE);
+                GardenMessages.MESSAGE_COLOR);
     }
 
     private Component button(String label, String command, String hover) {
-        return Component.text(label, NamedTextColor.AQUA)
+        return button(label, command, hover, GardenMessages.PETAL_FROST);
+    }
+
+    private Component button(String label, String command, String hover, net.kyori.adventure.text.format.TextColor color) {
+        return Component.text(label, color)
                 .clickEvent(ClickEvent.runCommand(command))
-                .hoverEvent(HoverEvent.showText(Component.text(hover)));
+                .hoverEvent(HoverEvent.showText(Component.text(hover, GardenMessages.NEUTRAL_GRAY)));
     }
 
     private String shortId(ShopRecord shop) {
