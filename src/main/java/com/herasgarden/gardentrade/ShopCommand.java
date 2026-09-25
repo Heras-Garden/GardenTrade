@@ -7,8 +7,11 @@ import com.herasgarden.gardentrade.model.ShopRecord;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.Directional;
+import org.bukkit.block.BlockFace;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -118,6 +121,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = buyback
                 ? shops.createBuyback(player, block, item, quantity, price, maxShops)
                 : shops.create(player, block, item, quantity, price, maxShops);
+        attachContainerShopSign(player, block, shop);
         visuals.refresh();
         sendCreated(player, shop);
         return true;
@@ -169,6 +173,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                     : shops.createGovernment(
                             player, organizationName, target, item, quantity, price, maxOrganizationShops);
         }
+        attachContainerShopSign(player, target, shop);
         visuals.refresh();
         sendCreated(player, shop);
         return true;
@@ -372,6 +377,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
         ShopRecord updated = shops.setPrice(player, shop, Long.parseLong(args[1].replace(",", "")));
+        syncContainerShopSign(updated);
         visuals.refresh();
         send(player, "Shop price set to ⟡ " + updated.price() + ".");
         return true;
@@ -385,6 +391,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
         ShopRecord updated = shops.setQuantity(player, shop, Integer.parseInt(args[1].replace(",", "")));
+        syncContainerShopSign(updated);
         visuals.refresh();
         send(player, "Shop quantity set to " + updated.quantity() + ".");
         return true;
@@ -398,6 +405,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
         ShopRecord updated = shops.setTransactionMode(player, shop, args[1]);
+        syncContainerShopSign(updated);
         visuals.refresh();
         send(player, updated.buysFromCustomer()
                 ? "Shop now buys items from customers."
@@ -430,6 +438,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
     private boolean delete(Player player) throws SQLException {
         ShopRecord shop = managedTargetShop(player);
         if (shop == null) return true;
+        removeContainerShopSigns(shop);
         shops.delete(shop.id());
         visuals.removeShopVisuals(shop.id());
         visuals.refresh();
@@ -506,6 +515,106 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
             return null;
         }
         return block;
+    }
+
+    private void attachContainerShopSign(Player player, Block container, ShopRecord shop) throws SQLException {
+        if (shop.signShop()) return;
+
+        BlockFace preferred = preferredHorizontalFace(player, container);
+        BlockFace[] order = {
+                preferred,
+                preferred.getOppositeFace(),
+                rotateLeft(preferred),
+                rotateRight(preferred)
+        };
+
+        for (BlockFace face : order) {
+            Block signBlock = container.getRelative(face);
+            if (!signBlock.isEmpty()) continue;
+
+            signBlock.setType(Material.OAK_WALL_SIGN, false);
+            if (!(signBlock.getBlockData() instanceof Directional directional)) {
+                signBlock.setType(Material.AIR, false);
+                continue;
+            }
+            directional.setFacing(face);
+            signBlock.setBlockData(directional, false);
+
+            if (signBlock.getState() instanceof Sign sign) {
+                writeContainerShopSign(sign, shop);
+                return;
+            }
+
+            signBlock.setType(Material.AIR, false);
+        }
+
+        shops.delete(shop.id());
+        throw new IllegalArgumentException(
+                "A chest shop needs one open horizontal side for its sign. The shop was not created.");
+    }
+
+    private void syncContainerShopSign(ShopRecord shop) {
+        if (shop.signShop()) return;
+        Block container = shops.blockFor(shop);
+        if (container == null) return;
+
+        for (BlockFace face : horizontalFaces()) {
+            Block block = container.getRelative(face);
+            if (!(block.getState() instanceof Sign sign) || !isGeneratedContainerShopSign(sign)) continue;
+            writeContainerShopSign(sign, shop);
+        }
+    }
+
+    private void removeContainerShopSigns(ShopRecord shop) {
+        if (shop.signShop()) return;
+        Block container = shops.blockFor(shop);
+        if (container == null) return;
+
+        for (BlockFace face : horizontalFaces()) {
+            Block block = container.getRelative(face);
+            if (block.getState() instanceof Sign sign && isGeneratedContainerShopSign(sign)) {
+                block.setType(Material.AIR, false);
+            }
+        }
+    }
+
+    private void writeContainerShopSign(Sign sign, ShopRecord shop) {
+        sign.setLine(0, "[GardenShop]");
+        sign.setLine(1, Integer.toString(shop.quantity()));
+        sign.setLine(2, (shop.buysFromCustomer() ? "S " : "B ") + shop.price());
+        sign.setLine(3, shop.itemLabel());
+        sign.update(true, false);
+    }
+
+    private boolean isGeneratedContainerShopSign(Sign sign) {
+        String first = sign.getLine(0);
+        return first != null && first.trim().equalsIgnoreCase("[GardenShop]");
+    }
+
+    private BlockFace preferredHorizontalFace(Player player, Block container) {
+        double dx = player.getLocation().getX() - (container.getX() + 0.5);
+        double dz = player.getLocation().getZ() - (container.getZ() + 0.5);
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? BlockFace.EAST : BlockFace.WEST;
+        }
+        return dz >= 0 ? BlockFace.SOUTH : BlockFace.NORTH;
+    }
+
+    private BlockFace rotateLeft(BlockFace face) {
+        return switch (face) {
+            case NORTH -> BlockFace.WEST;
+            case WEST -> BlockFace.SOUTH;
+            case SOUTH -> BlockFace.EAST;
+            default -> BlockFace.NORTH;
+        };
+    }
+
+    private BlockFace rotateRight(BlockFace face) {
+        return rotateLeft(face).getOppositeFace();
+    }
+
+    private BlockFace[] horizontalFaces() {
+        return new BlockFace[]{BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST};
     }
 
     private void sendCreated(Player player, ShopRecord shop) throws SQLException {
