@@ -4,9 +4,11 @@ import com.herasgarden.gardencore.api.GardenPlatform;
 import com.herasgarden.gardencore.api.claim.ClaimBlockService;
 import com.herasgarden.gardencore.api.land.LandAccessService;
 import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
+import com.herasgarden.gardentrade.api.BusinessDirectory;
 import com.herasgarden.gardentrade.storage.TradeSchema;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.RegisteredServiceProvider;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.sql.SQLException;
@@ -50,6 +52,17 @@ public final class GardenTrade extends JavaPlugin {
                 getServer().getServicesManager().getRegistration(ClaimBlockService.class);
         ClaimBlockService claimBlocks = claimBlockRegistration == null ? null : claimBlockRegistration.getProvider();
 
+        BusinessService businesses = new BusinessService(platform);
+        getServer().getServicesManager().register(BusinessDirectory.class, businesses, this, ServicePriority.Normal);
+        BusinessCommand businessCommand = new BusinessCommand(businesses);
+        PluginCommand business = getCommand("business");
+        if (business != null) {
+            business.setExecutor(businessCommand);
+            business.setTabCompleter(businessCommand);
+        }
+        getServer().getPluginManager().registerEvents(new BusinessAccessListener(businesses), this);
+        getServer().getScheduler().runTaskTimer(this, businesses::refreshAllSigns, 20L, 20L * 30L);
+
         ShopService shops = new ShopService(this, platform, land, organizations);
         int maxPlayerShops = getConfig().getInt("shops.max-per-player", 15);
         ShopVisualService visuals = new ShopVisualService(this, shops);
@@ -78,6 +91,6 @@ public final class GardenTrade extends JavaPlugin {
                 new ShopStockListener(visuals), this);
         getServer().getPluginManager().registerEvents(
                 new ShopVisualProtectionListener(visuals), this);
-        getLogger().info("GardenTrade enabled. Stocked chest shops, linked sign shops, buybacks, and protected shop visuals are active.");
+        getLogger().info("GardenTrade enabled. Shops plus Business > Workplace > Position > Employee systems are active.");
     }
 }
