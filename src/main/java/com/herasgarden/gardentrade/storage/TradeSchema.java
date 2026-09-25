@@ -74,6 +74,53 @@ public final class TradeSchema {
                     + "created_at BIGINT NOT NULL)");
             statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_shop_principal "
                     + "ON gt_shop_principals (principal_kind, principal_id)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_businesses ("
+                    + "business_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "name VARCHAR(64) NOT NULL UNIQUE,"
+                    + "owner_uuid VARCHAR(36) NOT NULL,"
+                    + "owner_name VARCHAR(32) NOT NULL,"
+                    + "created_at BIGINT NOT NULL)");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_business_owner "
+                    + "ON gt_businesses (owner_uuid, created_at)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_workplaces ("
+                    + "workplace_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "business_uuid VARCHAR(36) NOT NULL,"
+                    + "name VARCHAR(64) NOT NULL,"
+                    + "open_minute INTEGER NOT NULL DEFAULT 540,"
+                    + "close_minute INTEGER NOT NULL DEFAULT 1020,"
+                    + "created_at BIGINT NOT NULL)");
+            statement.executeUpdate("CREATE UNIQUE INDEX IF NOT EXISTS idx_gt_workplace_name "
+                    + "ON gt_workplaces (business_uuid, name)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_positions ("
+                    + "position_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "workplace_uuid VARCHAR(36) NOT NULL,"
+                    + "title VARCHAR(64) NOT NULL,"
+                    + "wage BIGINT NOT NULL DEFAULT 0,"
+                    + "employee_uuid VARCHAR(36) NULL,"
+                    + "employee_name VARCHAR(32) NULL,"
+                    + "hired_at BIGINT NULL,"
+                    + "created_at BIGINT NOT NULL)");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_position_workplace "
+                    + "ON gt_positions (workplace_uuid, employee_uuid)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_workplace_doors ("
+                    + "world_uuid VARCHAR(36) NOT NULL,"
+                    + "x INTEGER NOT NULL,"
+                    + "y INTEGER NOT NULL,"
+                    + "z INTEGER NOT NULL,"
+                    + "workplace_uuid VARCHAR(36) NOT NULL,"
+                    + "PRIMARY KEY (world_uuid, x, y, z))");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_workplace_signs ("
+                    + "world_uuid VARCHAR(36) NOT NULL,"
+                    + "x INTEGER NOT NULL,"
+                    + "y INTEGER NOT NULL,"
+                    + "z INTEGER NOT NULL,"
+                    + "workplace_uuid VARCHAR(36) NOT NULL,"
+                    + "PRIMARY KEY (world_uuid, x, y, z))");
         }
     }
 

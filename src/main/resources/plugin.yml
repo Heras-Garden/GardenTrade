@@ -8,11 +8,18 @@ description: Unified Garden storefronts and shop transactions.
 depend: [GardenCore, GardenLands]
 
 commands:
+  business:
+    description: Create and manage Garden businesses, workplaces, positions, staff, schedules, doors, and signs.
+    usage: /business <create|list|workplace|position|hire|fire>
   shop:
     description: Create and use Garden shops.
     usage: /shop <create|createbuy|info|buy|settings|link|unlink|appearance|setprice|setquantity|mode|delete|cleanup|list>
 
 permissions:
+  gardentrade.business:
+    default: true
+  gardentrade.business.admin:
+    default: op
   gardentrade.shop:
     default: true
   gardentrade.shop.create:
