@@ -9,6 +9,25 @@ public interface BusinessDirectory {
     boolean hire(UUID positionId, UUID employeeId, String employeeName) throws SQLException;
     boolean vacate(UUID positionId, UUID employeeId) throws SQLException;
 
-    record Vacancy(UUID businessId, String businessName, UUID workplaceId, String workplaceName,
-                   UUID territoryClaimId, UUID positionId, String positionTitle, long wage) {}
+    record Vacancy(
+            UUID businessId,
+            String businessName,
+            UUID workplaceId,
+            String workplaceName,
+            UUID territoryClaimId,
+            UUID positionId,
+            String positionTitle,
+            long wage,
+            String audience,
+            int shiftStartMinute,
+            int shiftEndMinute,
+            UUID workWorldId,
+            Integer workX,
+            Integer workY,
+            Integer workZ
+    ) {
+        public boolean acceptsSociety() {
+            return audience == null || audience.equalsIgnoreCase("ANY") || audience.equalsIgnoreCase("SOCIETY");
+        }
+    }
 }

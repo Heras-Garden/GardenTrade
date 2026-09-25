@@ -2,6 +2,7 @@ package com.herasgarden.gardentrade;
 
 import com.herasgarden.gardencore.api.GardenPlatform;
 import com.herasgarden.gardencore.api.claim.ClaimBlockService;
+import com.herasgarden.gardencore.api.calendar.GardenCalendar;
 import com.herasgarden.gardencore.api.land.LandAccessService;
 import com.herasgarden.gardencore.api.land.GardenTerritoryDirectory;
 import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
@@ -36,6 +37,15 @@ public final class GardenTrade extends JavaPlugin {
             return;
         }
 
+        RegisteredServiceProvider<GardenCalendar> calendarRegistration =
+                getServer().getServicesManager().getRegistration(GardenCalendar.class);
+        if (calendarRegistration == null || calendarRegistration.getProvider() == null) {
+            getLogger().severe("GardenCore calendar service is unavailable.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+        GardenCalendar calendar = calendarRegistration.getProvider();
+
         RegisteredServiceProvider<LandAccessService> landRegistration =
                 getServer().getServicesManager().getRegistration(LandAccessService.class);
         LandAccessService land = landRegistration == null ? null : landRegistration.getProvider();
@@ -61,7 +71,7 @@ public final class GardenTrade extends JavaPlugin {
             return;
         }
 
-        BusinessService businesses = new BusinessService(platform, territoryRegistration.getProvider(), land);
+        BusinessService businesses = new BusinessService(platform, calendar, territoryRegistration.getProvider(), land);
         getServer().getServicesManager().register(BusinessDirectory.class, businesses, this, ServicePriority.Normal);
         BusinessCommand businessCommand = new BusinessCommand(businesses);
         PluginCommand business = getCommand("business");
@@ -72,6 +82,7 @@ public final class GardenTrade extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new BusinessAccessListener(businesses), this);
         getServer().getScheduler().runTaskTimer(this, businesses::refreshAllSigns, 20L, 20L * 30L);
         getServer().getScheduler().runTaskTimer(this, businesses::closeClosedDoors, 20L, 20L);
+        getServer().getScheduler().runTaskTimer(this, businesses::runScheduledPayroll, 20L * 30L, 20L * 60L);
 
         ShopService shops = new ShopService(this, platform, land, organizations, businesses);
         int maxPlayerShops = getConfig().getInt("shops.max-per-player", 15);
