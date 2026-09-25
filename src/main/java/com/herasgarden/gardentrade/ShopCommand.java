@@ -542,6 +542,7 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
 
             if (signBlock.getState() instanceof Sign sign) {
                 writeContainerShopSign(sign, shop);
+                shops.bindContainerSign(shop.id(), signBlock);
                 return;
             }
 
@@ -553,29 +554,21 @@ public final class ShopCommand implements CommandExecutor, TabCompleter {
                 "A chest shop needs one open horizontal side for its sign. The shop was not created.");
     }
 
-    private void syncContainerShopSign(ShopRecord shop) {
+    private void syncContainerShopSign(ShopRecord shop) throws SQLException {
         if (shop.signShop()) return;
-        Block container = shops.blockFor(shop);
-        if (container == null) return;
-
-        for (BlockFace face : horizontalFaces()) {
-            Block block = container.getRelative(face);
-            if (!(block.getState() instanceof Sign sign) || !isGeneratedContainerShopSign(sign)) continue;
+        Block block = shops.containerSignBlock(shop.id()).orElse(null);
+        if (block != null && block.getState() instanceof Sign sign) {
             writeContainerShopSign(sign, shop);
         }
     }
 
-    private void removeContainerShopSigns(ShopRecord shop) {
+    private void removeContainerShopSigns(ShopRecord shop) throws SQLException {
         if (shop.signShop()) return;
-        Block container = shops.blockFor(shop);
-        if (container == null) return;
-
-        for (BlockFace face : horizontalFaces()) {
-            Block block = container.getRelative(face);
-            if (block.getState() instanceof Sign sign && isGeneratedContainerShopSign(sign)) {
-                block.setType(Material.AIR, false);
-            }
+        Block block = shops.containerSignBlock(shop.id()).orElse(null);
+        if (block != null && block.getState() instanceof Sign) {
+            block.setType(Material.AIR, false);
         }
+        shops.clearContainerSignBinding(shop.id());
     }
 
     private void writeContainerShopSign(Sign sign, ShopRecord shop) {

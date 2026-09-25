@@ -61,7 +61,7 @@ public final class GardenTrade extends JavaPlugin {
             return;
         }
 
-        BusinessService businesses = new BusinessService(platform, territoryRegistration.getProvider());
+        BusinessService businesses = new BusinessService(platform, territoryRegistration.getProvider(), land);
         getServer().getServicesManager().register(BusinessDirectory.class, businesses, this, ServicePriority.Normal);
         BusinessCommand businessCommand = new BusinessCommand(businesses);
         PluginCommand business = getCommand("business");
@@ -71,8 +71,9 @@ public final class GardenTrade extends JavaPlugin {
         }
         getServer().getPluginManager().registerEvents(new BusinessAccessListener(businesses), this);
         getServer().getScheduler().runTaskTimer(this, businesses::refreshAllSigns, 20L, 20L * 30L);
+        getServer().getScheduler().runTaskTimer(this, businesses::closeClosedDoors, 20L, 20L);
 
-        ShopService shops = new ShopService(this, platform, land, organizations);
+        ShopService shops = new ShopService(this, platform, land, organizations, businesses);
         int maxPlayerShops = getConfig().getInt("shops.max-per-player", 15);
         ShopVisualService visuals = new ShopVisualService(this, shops);
         visuals.start();

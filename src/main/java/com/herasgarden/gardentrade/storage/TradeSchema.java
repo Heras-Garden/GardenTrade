@@ -127,6 +127,19 @@ public final class TradeSchema {
                     + "z INTEGER NOT NULL,"
                     + "workplace_uuid VARCHAR(36) NOT NULL,"
                     + "PRIMARY KEY (world_uuid, x, y, z))");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_shop_workplaces ("
+                    + "shop_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "workplace_uuid VARCHAR(36) NOT NULL)");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_shop_workplace "
+                    + "ON gt_shop_workplaces (workplace_uuid)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_container_shop_signs ("
+                    + "shop_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "world_uuid VARCHAR(36) NOT NULL,"
+                    + "x INTEGER NOT NULL,"
+                    + "y INTEGER NOT NULL,"
+                    + "z INTEGER NOT NULL)");
         }
     }
 

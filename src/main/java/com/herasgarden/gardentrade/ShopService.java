@@ -48,15 +48,22 @@ public final class ShopService {
     private final GardenPlatform platform;
     private final LandAccessService land;
     private final OrganizationDirectory organizations;
+    private final BusinessService businesses;
     private final Map<UUID, Object> purchaseLocks = new ConcurrentHashMap<>();
     private final Map<UUID, UUID> pendingStockLinks = new ConcurrentHashMap<>();
 
-    public ShopService(JavaPlugin plugin, GardenPlatform platform, LandAccessService land,
-                       OrganizationDirectory organizations) {
+    public ShopService(
+            JavaPlugin plugin,
+            GardenPlatform platform,
+            LandAccessService land,
+            OrganizationDirectory organizations,
+            BusinessService businesses
+    ) {
         this.plugin = plugin;
         this.platform = platform;
         this.land = land;
         this.organizations = organizations;
+        this.businesses = businesses;
     }
 
     public ShopRecord create(Player owner, Block block, ItemStack template, int quantity, long price, int maxShops)
@@ -750,6 +757,13 @@ public final class ShopService {
 
     public boolean delete(UUID shopId) throws SQLException {
         pendingStockLinks.entrySet().removeIf(entry -> entry.getValue().equals(shopId));
+        clearContainerSignBinding(shopId);
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement workplace = connection.prepareStatement(
+                     "DELETE FROM gt_shop_workplaces WHERE shop_uuid = ?")) {
+            workplace.setString(1, shopId.toString());
+            workplace.executeUpdate();
+        }
         try (Connection connection = platform.storage().connection()) {
             connection.setAutoCommit(false);
             try {
@@ -775,6 +789,50 @@ public final class ShopService {
         }
     }
 
+    public void bindContainerSign(UUID shopId, Block signBlock) throws SQLException {
+        try (Connection connection = platform.storage().connection()) {
+            try (PreparedStatement delete = connection.prepareStatement(
+                    "DELETE FROM gt_container_shop_signs WHERE shop_uuid = ?")) {
+                delete.setString(1, shopId.toString());
+                delete.executeUpdate();
+            }
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO gt_container_shop_signs "
+                            + "(shop_uuid, world_uuid, x, y, z) VALUES (?, ?, ?, ?, ?)")) {
+                insert.setString(1, shopId.toString());
+                insert.setString(2, signBlock.getWorld().getUID().toString());
+                insert.setInt(3, signBlock.getX());
+                insert.setInt(4, signBlock.getY());
+                insert.setInt(5, signBlock.getZ());
+                insert.executeUpdate();
+            }
+        }
+    }
+
+    public Optional<Block> containerSignBlock(UUID shopId) throws SQLException {
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT world_uuid,x,y,z FROM gt_container_shop_signs WHERE shop_uuid = ?")) {
+            statement.setString(1, shopId.toString());
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) return Optional.empty();
+                World world = Bukkit.getWorld(UUID.fromString(result.getString("world_uuid")));
+                if (world == null) return Optional.empty();
+                return Optional.of(world.getBlockAt(
+                        result.getInt("x"), result.getInt("y"), result.getInt("z")));
+            }
+        }
+    }
+
+    public void clearContainerSignBinding(UUID shopId) throws SQLException {
+        try (Connection connection = platform.storage().connection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "DELETE FROM gt_container_shop_signs WHERE shop_uuid = ?")) {
+            statement.setString(1, shopId.toString());
+            statement.executeUpdate();
+        }
+    }
+
     public PurchaseResult purchase(Player customer, ShopRecord requested, int units) throws SQLException {
         if (units <= 0 || units > 64) {
             return PurchaseResult.failure("Transaction units must be between 1 and 64.");
@@ -783,6 +841,11 @@ public final class ShopService {
         ShopRecord shop = find(requested.id()).orElse(null);
         if (shop == null || !shop.enabled()) {
             return PurchaseResult.failure("That shop is unavailable.");
+        }
+
+        Optional<String> businessBlock = businesses.transactionBlockReason(shop.id());
+        if (businessBlock.isPresent()) {
+            return PurchaseResult.failure(businessBlock.get());
         }
 
         ShopPrincipal principal = principal(shop);
