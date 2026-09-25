@@ -7,6 +7,7 @@ import com.herasgarden.gardencore.api.land.LandAccessService;
 import com.herasgarden.gardencore.api.land.GardenTerritoryDirectory;
 import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
 import com.herasgarden.gardentrade.api.BusinessDirectory;
+import com.herasgarden.gardentrade.api.SocietyMarketDirectory;
 import com.herasgarden.gardentrade.storage.TradeSchema;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -85,6 +86,8 @@ public final class GardenTrade extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, businesses::runScheduledPayroll, 20L * 30L, 20L * 60L);
 
         ShopService shops = new ShopService(this, platform, land, organizations, businesses);
+        getServer().getServicesManager().register(
+                SocietyMarketDirectory.class, shops, this, ServicePriority.Normal);
         int maxPlayerShops = getConfig().getInt("shops.max-per-player", 15);
         ShopVisualService visuals = new ShopVisualService(this, shops);
         visuals.start();
