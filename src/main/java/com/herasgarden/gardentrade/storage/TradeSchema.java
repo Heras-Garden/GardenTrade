@@ -88,9 +88,15 @@ public final class TradeSchema {
                     + "workplace_uuid VARCHAR(36) PRIMARY KEY,"
                     + "business_uuid VARCHAR(36) NOT NULL,"
                     + "name VARCHAR(64) NOT NULL,"
+                    + "territory_claim_uuid VARCHAR(36) NULL,"
                     + "open_minute INTEGER NOT NULL DEFAULT 540,"
                     + "close_minute INTEGER NOT NULL DEFAULT 1020,"
                     + "created_at BIGINT NOT NULL)");
+            ensureColumn(connection, "gt_workplaces", "territory_claim_uuid",
+                    "ALTER TABLE gt_workplaces ADD COLUMN territory_claim_uuid VARCHAR(36) NULL");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_workplace_territory "
+                    + "ON gt_workplaces (territory_claim_uuid)");
+
             statement.executeUpdate("CREATE UNIQUE INDEX IF NOT EXISTS idx_gt_workplace_name "
                     + "ON gt_workplaces (business_uuid, name)");
 

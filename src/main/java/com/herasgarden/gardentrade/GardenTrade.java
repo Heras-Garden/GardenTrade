@@ -3,6 +3,7 @@ package com.herasgarden.gardentrade;
 import com.herasgarden.gardencore.api.GardenPlatform;
 import com.herasgarden.gardencore.api.claim.ClaimBlockService;
 import com.herasgarden.gardencore.api.land.LandAccessService;
+import com.herasgarden.gardencore.api.land.GardenTerritoryDirectory;
 import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
 import com.herasgarden.gardentrade.api.BusinessDirectory;
 import com.herasgarden.gardentrade.storage.TradeSchema;
@@ -52,7 +53,15 @@ public final class GardenTrade extends JavaPlugin {
                 getServer().getServicesManager().getRegistration(ClaimBlockService.class);
         ClaimBlockService claimBlocks = claimBlockRegistration == null ? null : claimBlockRegistration.getProvider();
 
-        BusinessService businesses = new BusinessService(platform);
+        RegisteredServiceProvider<GardenTerritoryDirectory> territoryRegistration =
+                getServer().getServicesManager().getRegistration(GardenTerritoryDirectory.class);
+        if (territoryRegistration == null || territoryRegistration.getProvider() == null) {
+            getLogger().severe("GardenLands territory directory service is unavailable.");
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
+        BusinessService businesses = new BusinessService(platform, territoryRegistration.getProvider());
         getServer().getServicesManager().register(BusinessDirectory.class, businesses, this, ServicePriority.Normal);
         BusinessCommand businessCommand = new BusinessCommand(businesses);
         PluginCommand business = getCommand("business");

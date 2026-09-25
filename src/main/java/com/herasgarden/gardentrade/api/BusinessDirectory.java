@@ -7,7 +7,8 @@ import java.util.UUID;
 public interface BusinessDirectory {
     List<Vacancy> vacancies() throws SQLException;
     boolean hire(UUID positionId, UUID employeeId, String employeeName) throws SQLException;
+    boolean vacate(UUID positionId, UUID employeeId) throws SQLException;
 
     record Vacancy(UUID businessId, String businessName, UUID workplaceId, String workplaceName,
-                   UUID positionId, String positionTitle, long wage) {}
+                   UUID territoryClaimId, UUID positionId, String positionTitle, long wage) {}
 }

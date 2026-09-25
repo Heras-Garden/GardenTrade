@@ -38,13 +38,14 @@ public final class BusinessCommand implements CommandExecutor, TabCompleter {
         return true;
     }
     private void workplace(Player p,String[] a)throws SQLException{
-        if(a.length<2){GardenMessages.send(p,"Use /business workplace <create|schedule|door|sign>.");return;}
+        if(a.length<2){GardenMessages.send(p,"Use /business workplace <create|territory|schedule|door|sign>.");return;}
         switch(a[1].toLowerCase(Locale.ROOT)){
             case "create"->{if(a.length<4)throw new IllegalArgumentException("Use /business workplace create <business> <name>.");var w=businesses.createWorkplace(p,a[2],join(a,3));GardenMessages.send(p,"Created workplace "+w.name()+". Default hours are 09:00-17:00.");}
+            case "territory"->{if(a.length<5)throw new IllegalArgumentException("Use /business workplace territory <business> <workplace> <territory>.");businesses.setTerritory(p,a[2],a[3],join(a,4));GardenMessages.send(p,"Bound "+a[3]+" to "+join(a,4)+".");}
             case "schedule"->{if(a.length<6)throw new IllegalArgumentException("Use /business workplace schedule <business> <workplace> <open HH:mm> <close HH:mm>.");businesses.setSchedule(p,a[2],a[3],a[4],a[5]);GardenMessages.send(p,"Updated "+a[3]+" schedule.");}
             case "door"->{if(a.length<4)throw new IllegalArgumentException("Use /business workplace door <business> <workplace> while looking at a door.");Block b=p.getTargetBlockExact(6);if(b==null)throw new IllegalArgumentException("Look directly at a door or trapdoor.");businesses.bindDoor(p,a[2],a[3],b);GardenMessages.send(p,"Linked that door to "+a[3]+".");}
             case "sign"->{if(a.length<4)throw new IllegalArgumentException("Use /business workplace sign <business> <workplace> while looking at a sign.");Block b=p.getTargetBlockExact(6);if(b==null)throw new IllegalArgumentException("Look directly at a sign.");businesses.bindSign(p,a[2],a[3],b);GardenMessages.send(p,"Linked and refreshed that OPEN/CLOSED sign.");}
-            default->GardenMessages.send(p,"Use /business workplace <create|schedule|door|sign>.");
+            default->GardenMessages.send(p,"Use /business workplace <create|territory|schedule|door|sign>.");
         }
     }
     private void position(Player p,String[] a)throws SQLException{
@@ -65,7 +66,7 @@ public final class BusinessCommand implements CommandExecutor, TabCompleter {
     private void help(Player p){GardenMessages.send(p,"/business create <name>, list, workplace <create|schedule|door|sign>, position create, hire, fire");}
     @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
         if(args.length==1)return match(args[0],List.of("create","list","workplace","position","hire","fire"));
-        if(args.length==2&&args[0].equalsIgnoreCase("workplace"))return match(args[1],List.of("create","schedule","door","sign"));
+        if(args.length==2&&args[0].equalsIgnoreCase("workplace"))return match(args[1],List.of("create","territory","schedule","door","sign"));
         if(args.length==2&&args[0].equalsIgnoreCase("position"))return match(args[1],List.of("create"));
         return List.of();
     }
