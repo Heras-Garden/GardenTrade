@@ -140,6 +140,50 @@ public final class TradeSchema {
                     + "x INTEGER NOT NULL,"
                     + "y INTEGER NOT NULL,"
                     + "z INTEGER NOT NULL)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_workplace_schedule ("
+                    + "workplace_uuid VARCHAR(36) NOT NULL,"
+                    + "weekday INTEGER NOT NULL,"
+                    + "open_minute INTEGER NOT NULL,"
+                    + "close_minute INTEGER NOT NULL,"
+                    + "closed INTEGER NOT NULL DEFAULT 0,"
+                    + "PRIMARY KEY (workplace_uuid, weekday))");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_business_overrides ("
+                    + "business_uuid VARCHAR(36) PRIMARY KEY,"
+                    + "override_state VARCHAR(16) NOT NULL,"
+                    + "expires_day BIGINT NULL,"
+                    + "updated_at BIGINT NOT NULL)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_business_payroll ("
+                    + "business_uuid VARCHAR(36) NOT NULL,"
+                    + "garden_day BIGINT NOT NULL,"
+                    + "position_uuid VARCHAR(36) NOT NULL,"
+                    + "employee_uuid VARCHAR(36) NOT NULL,"
+                    + "amount BIGINT NOT NULL,"
+                    + "status VARCHAR(24) NOT NULL,"
+                    + "created_at BIGINT NOT NULL,"
+                    + "PRIMARY KEY (business_uuid, garden_day, position_uuid))");
+
+            ensureColumn(connection, "gt_positions", "audience",
+                    "ALTER TABLE gt_positions ADD COLUMN audience VARCHAR(16) NOT NULL DEFAULT 'BOTH'");
+            ensureColumn(connection, "gt_positions", "shift_start",
+                    "ALTER TABLE gt_positions ADD COLUMN shift_start INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "shift_end",
+                    "ALTER TABLE gt_positions ADD COLUMN shift_end INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "anchor_world_uuid",
+                    "ALTER TABLE gt_positions ADD COLUMN anchor_world_uuid VARCHAR(36) NULL");
+            ensureColumn(connection, "gt_positions", "anchor_x",
+                    "ALTER TABLE gt_positions ADD COLUMN anchor_x INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "anchor_y",
+                    "ALTER TABLE gt_positions ADD COLUMN anchor_y INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "anchor_z",
+                    "ALTER TABLE gt_positions ADD COLUMN anchor_z INTEGER NULL");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_position_permissions ("
+                    + "position_uuid VARCHAR(36) NOT NULL,"
+                    + "permission_key VARCHAR(48) NOT NULL,"
+                    + "PRIMARY KEY (position_uuid, permission_key))");
         }
     }
 
