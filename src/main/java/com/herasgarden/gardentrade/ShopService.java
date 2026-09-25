@@ -10,6 +10,7 @@ import com.herasgarden.gardencore.api.organization.OrganizationDirectory;
 import com.herasgarden.gardencore.api.organization.OrganizationView;
 import com.herasgarden.gardencore.api.ui.GardenMessages;
 import com.herasgarden.gardentrade.model.ShopPrincipal;
+import com.herasgarden.gardentrade.api.SocietyMarketDirectory;
 import com.herasgarden.gardentrade.model.ShopRecord;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -38,7 +39,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class ShopService {
+public final class ShopService implements SocietyMarketDirectory {
     private static final String KIND_CONTAINER = "CONTAINER";
     private static final String KIND_SIGN = "SIGN";
     private static final String MODE_SELL = "SELL";
@@ -830,6 +831,102 @@ public final class ShopService {
                      "DELETE FROM gt_container_shop_signs WHERE shop_uuid = ?")) {
             statement.setString(1, shopId.toString());
             statement.executeUpdate();
+        }
+    }
+
+    @Override
+    public Optional<SocietyMarketDirectory.Offer> nearestOpenOffer(
+            UUID worldId, double x, double y, double z, long maxPrice) throws SQLException {
+        SocietyMarketDirectory.Offer best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (ShopRecord shop : all()) {
+            if (!shop.sellsToCustomer() || shop.price() <= 0 || shop.price() > maxPrice) continue;
+            if (worldId != null && !worldId.equals(shop.worldId())) continue;
+            if (businesses.transactionBlockReason(shop.id()).isPresent()) continue;
+            if (isSoldOut(shop)) continue;
+            double dx = shop.x() + 0.5 - x;
+            double dy = shop.y() + 0.5 - y;
+            double dz = shop.z() + 0.5 - z;
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = new SocietyMarketDirectory.Offer(
+                        shop.id(), shop.worldId(), shop.x() + 0.5, shop.y() + 0.5, shop.z() + 0.5,
+                        shop.itemLabel(), shop.quantity(), shop.price());
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    @Override
+    public SocietyMarketDirectory.PurchaseResult consume(
+            UUID consumerId, String consumerName, UUID shopId) throws SQLException {
+        ShopRecord shop = find(shopId).orElse(null);
+        if (shop == null || !shop.enabled() || !shop.sellsToCustomer()) {
+            return SocietyMarketDirectory.PurchaseResult.failure("That shop is unavailable.");
+        }
+        Optional<String> businessBlock = businesses.transactionBlockReason(shop.id());
+        if (businessBlock.isPresent()) {
+            return SocietyMarketDirectory.PurchaseResult.failure(businessBlock.get());
+        }
+        ShopPrincipal principal = principal(shop);
+        if (principal.id().equals(consumerId)) {
+            return SocietyMarketDirectory.PurchaseResult.failure("The consumer owns that shop.");
+        }
+
+        Object lock = purchaseLocks.computeIfAbsent(shop.id(), ignored -> new Object());
+        synchronized (lock) {
+            ItemStack template = displayItem(shop);
+            Block stockBlock = null;
+            Inventory stock = null;
+            int itemCount = shop.quantity();
+            if (!shop.unlimitedStock()) {
+                stockBlock = stockBlockFor(shop);
+                if (stockBlock == null || !(stockBlock.getState() instanceof Container container)) {
+                    return SocietyMarketDirectory.PurchaseResult.failure("The shop stock container is missing.");
+                }
+                stock = container.getInventory();
+                if (countSimilar(stock, template) < itemCount) {
+                    return SocietyMarketDirectory.PurchaseResult.failure("That shop is sold out.");
+                }
+            }
+
+            GardenOrder order = platform.orders().create(
+                    OrderType.SHOP_PURCHASE,
+                    consumerId,
+                    principal.kind(),
+                    principal.id().toString(),
+                    shop.price(),
+                    "gardentrade.society-consume",
+                    shop.id().toString(),
+                    "{\"shopUuid\":\"" + shop.id() + "\",\"buyerKind\":\"SOCIETY_CITIZEN\",\"buyerName\":\""
+                            + json(consumerName) + "\",\"item\":\"" + json(shop.itemLabel())
+                            + "\",\"quantity\":" + shop.quantity() + "}"
+            );
+            platform.orders().transition(order.id(), OrderState.READY, "Society shop stock validated");
+            platform.orders().transition(order.id(), OrderState.AWAITING_CONFIRMATION, "Resident selected open shop");
+            platform.orders().transition(order.id(), OrderState.PAYMENT_PENDING, "Collecting resident payment");
+
+            if (stock != null && !removeSimilar(stock, template, itemCount)) {
+                platform.orders().transition(order.id(), OrderState.CANCELLED, "Shop stock changed");
+                return SocietyMarketDirectory.PurchaseResult.failure("The shop stock changed.");
+            }
+            if (!platform.currency().withdraw(consumerId, shop.price())) {
+                if (stock != null) restore(stock, template, itemCount, stockBlock);
+                platform.orders().transition(order.id(), OrderState.PAYMENT_FAILED, "Resident has insufficient Obols");
+                return SocietyMarketDirectory.PurchaseResult.failure("The resident cannot afford this purchase.");
+            }
+            if (!creditPrincipal(principal, shop.price())) {
+                platform.currency().deposit(consumerId, shop.price());
+                if (stock != null) restore(stock, template, itemCount, stockBlock);
+                platform.orders().transition(order.id(), OrderState.REFUNDED, "Shop payout failed; resident refunded");
+                return SocietyMarketDirectory.PurchaseResult.failure("The shop owner could not be paid.");
+            }
+
+            platform.orders().transition(order.id(), OrderState.PAID, "Society purchase paid");
+            platform.orders().transition(order.id(), OrderState.FULFILLING, "Resident consuming purchased goods");
+            platform.orders().transition(order.id(), OrderState.COMPLETED, "Purchased goods consumed by Society resident");
+            return SocietyMarketDirectory.PurchaseResult.success(shop.price(), shop.itemLabel());
         }
     }
 
