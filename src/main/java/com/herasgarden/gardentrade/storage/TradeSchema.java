@@ -80,7 +80,16 @@ public final class TradeSchema {
                     + "name VARCHAR(64) NOT NULL UNIQUE,"
                     + "owner_uuid VARCHAR(36) NOT NULL,"
                     + "owner_name VARCHAR(32) NOT NULL,"
+                    + "state_override VARCHAR(12) NOT NULL DEFAULT 'AUTO',"
+                    + "override_until_day BIGINT NULL,"
+                    + "override_until_minute INTEGER NULL,"
                     + "created_at BIGINT NOT NULL)");
+            ensureColumn(connection, "gt_businesses", "state_override",
+                    "ALTER TABLE gt_businesses ADD COLUMN state_override VARCHAR(12) NOT NULL DEFAULT 'AUTO'");
+            ensureColumn(connection, "gt_businesses", "override_until_day",
+                    "ALTER TABLE gt_businesses ADD COLUMN override_until_day BIGINT NULL");
+            ensureColumn(connection, "gt_businesses", "override_until_minute",
+                    "ALTER TABLE gt_businesses ADD COLUMN override_until_minute INTEGER NULL");
             statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_business_owner "
                     + "ON gt_businesses (owner_uuid, created_at)");
 
@@ -91,7 +100,16 @@ public final class TradeSchema {
                     + "territory_claim_uuid VARCHAR(36) NULL,"
                     + "open_minute INTEGER NOT NULL DEFAULT 540,"
                     + "close_minute INTEGER NOT NULL DEFAULT 1020,"
+                    + "state_override VARCHAR(12) NOT NULL DEFAULT 'AUTO',"
+                    + "override_until_day BIGINT NULL,"
+                    + "override_until_minute INTEGER NULL,"
                     + "created_at BIGINT NOT NULL)");
+            ensureColumn(connection, "gt_workplaces", "state_override",
+                    "ALTER TABLE gt_workplaces ADD COLUMN state_override VARCHAR(12) NOT NULL DEFAULT 'AUTO'");
+            ensureColumn(connection, "gt_workplaces", "override_until_day",
+                    "ALTER TABLE gt_workplaces ADD COLUMN override_until_day BIGINT NULL");
+            ensureColumn(connection, "gt_workplaces", "override_until_minute",
+                    "ALTER TABLE gt_workplaces ADD COLUMN override_until_minute INTEGER NULL");
             ensureColumn(connection, "gt_workplaces", "territory_claim_uuid",
                     "ALTER TABLE gt_workplaces ADD COLUMN territory_claim_uuid VARCHAR(36) NULL");
             statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_workplace_territory "
@@ -100,15 +118,47 @@ public final class TradeSchema {
             statement.executeUpdate("CREATE UNIQUE INDEX IF NOT EXISTS idx_gt_workplace_name "
                     + "ON gt_workplaces (business_uuid, name)");
 
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_workplace_schedules ("
+                    + "workplace_uuid VARCHAR(36) NOT NULL,"
+                    + "weekday VARCHAR(12) NOT NULL,"
+                    + "enabled INTEGER NOT NULL DEFAULT 1,"
+                    + "open_minute INTEGER NOT NULL,"
+                    + "close_minute INTEGER NOT NULL,"
+                    + "PRIMARY KEY (workplace_uuid, weekday))");
+
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_positions ("
                     + "position_uuid VARCHAR(36) PRIMARY KEY,"
                     + "workplace_uuid VARCHAR(36) NOT NULL,"
                     + "title VARCHAR(64) NOT NULL,"
                     + "wage BIGINT NOT NULL DEFAULT 0,"
+                    + "audience VARCHAR(16) NOT NULL DEFAULT 'ANY',"
+                    + "shift_start_minute INTEGER NOT NULL DEFAULT 540,"
+                    + "shift_end_minute INTEGER NOT NULL DEFAULT 1020,"
+                    + "permissions VARCHAR(128) NOT NULL DEFAULT 'ENTER',"
+                    + "work_world_uuid VARCHAR(36) NULL,"
+                    + "work_x INTEGER NULL,"
+                    + "work_y INTEGER NULL,"
+                    + "work_z INTEGER NULL,"
                     + "employee_uuid VARCHAR(36) NULL,"
                     + "employee_name VARCHAR(32) NULL,"
                     + "hired_at BIGINT NULL,"
                     + "created_at BIGINT NOT NULL)");
+            ensureColumn(connection, "gt_positions", "audience",
+                    "ALTER TABLE gt_positions ADD COLUMN audience VARCHAR(16) NOT NULL DEFAULT 'ANY'");
+            ensureColumn(connection, "gt_positions", "shift_start_minute",
+                    "ALTER TABLE gt_positions ADD COLUMN shift_start_minute INTEGER NOT NULL DEFAULT 540");
+            ensureColumn(connection, "gt_positions", "shift_end_minute",
+                    "ALTER TABLE gt_positions ADD COLUMN shift_end_minute INTEGER NOT NULL DEFAULT 1020");
+            ensureColumn(connection, "gt_positions", "permissions",
+                    "ALTER TABLE gt_positions ADD COLUMN permissions VARCHAR(128) NOT NULL DEFAULT 'ENTER'");
+            ensureColumn(connection, "gt_positions", "work_world_uuid",
+                    "ALTER TABLE gt_positions ADD COLUMN work_world_uuid VARCHAR(36) NULL");
+            ensureColumn(connection, "gt_positions", "work_x",
+                    "ALTER TABLE gt_positions ADD COLUMN work_x INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "work_y",
+                    "ALTER TABLE gt_positions ADD COLUMN work_y INTEGER NULL");
+            ensureColumn(connection, "gt_positions", "work_z",
+                    "ALTER TABLE gt_positions ADD COLUMN work_z INTEGER NULL");
             statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_position_workplace "
                     + "ON gt_positions (workplace_uuid, employee_uuid)");
 
@@ -133,6 +183,17 @@ public final class TradeSchema {
                     + "workplace_uuid VARCHAR(36) NOT NULL)");
             statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_shop_workplace "
                     + "ON gt_shop_workplaces (workplace_uuid)");
+
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_payroll_runs ("
+                    + "position_uuid VARCHAR(36) NOT NULL,"
+                    + "garden_day BIGINT NOT NULL,"
+                    + "business_uuid VARCHAR(36) NOT NULL,"
+                    + "employee_uuid VARCHAR(36) NOT NULL,"
+                    + "amount BIGINT NOT NULL,"
+                    + "paid_at BIGINT NOT NULL,"
+                    + "PRIMARY KEY (position_uuid, garden_day))");
+            statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_gt_payroll_business "
+                    + "ON gt_payroll_runs (business_uuid, garden_day)");
 
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS gt_container_shop_signs ("
                     + "shop_uuid VARCHAR(36) PRIMARY KEY,"
