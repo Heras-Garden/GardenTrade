@@ -2,11 +2,15 @@ package com.herasgarden.gardentrade;
 
 import com.herasgarden.gardencore.api.GardenPlatform;
 import com.herasgarden.gardencore.api.land.GardenTerritoryDirectory;
+import com.herasgarden.gardencore.api.land.LandAccessService;
 import com.herasgarden.gardentrade.api.BusinessDirectory;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.Bisected;
+import org.bukkit.block.data.Openable;
+import org.bukkit.block.data.type.Door;
 import org.bukkit.entity.Player;
 
 import java.sql.Connection;
@@ -24,10 +28,16 @@ public final class BusinessService implements BusinessDirectory {
     private static final ZoneId ZONE = ZoneId.of("America/New_York");
     private final GardenPlatform platform;
     private final GardenTerritoryDirectory territories;
+    private final LandAccessService land;
 
-    public BusinessService(GardenPlatform platform, GardenTerritoryDirectory territories) {
+    public BusinessService(
+            GardenPlatform platform,
+            GardenTerritoryDirectory territories,
+            LandAccessService land
+    ) {
         this.platform = platform;
         this.territories = territories;
+        this.land = land;
     }
 
     public Business createBusiness(Player owner, String name) throws SQLException {
@@ -147,19 +157,107 @@ public final class BusinessService implements BusinessDirectory {
         Business business = requireOwnedBusiness(actor, businessName);
         Workplace workplace = requireWorkplace(business.id(), workplaceName);
         if (!isDoor(block.getType())) throw new IllegalArgumentException("Look directly at a door or trapdoor.");
-        bindBlock("gt_workplace_doors", workplace.id(), block);
+        validateManagedBlock(actor, block);
+        bindBlocks("gt_workplace_doors", workplace.id(), doorBlocks(block));
     }
 
     public void bindSign(Player actor, String businessName, String workplaceName, Block block) throws SQLException {
         Business business = requireOwnedBusiness(actor, businessName);
         Workplace workplace = requireWorkplace(business.id(), workplaceName);
         if (!(block.getState() instanceof Sign)) throw new IllegalArgumentException("Look directly at a sign.");
-        bindBlock("gt_workplace_signs", workplace.id(), block); refreshSigns(workplace.id());
+        validateManagedBlock(actor, block);
+        bindBlocks("gt_workplace_signs", workplace.id(), List.of(block));
+        refreshSigns(workplace.id());
+    }
+
+    public void bindShop(
+            Player actor,
+            String businessName,
+            String workplaceName,
+            UUID shopId
+    ) throws SQLException {
+        Business business = requireOwnedBusiness(actor, businessName);
+        Workplace workplace = requireWorkplace(business.id(), workplaceName);
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement(
+                     "SELECT owner_uuid FROM gt_shops WHERE shop_uuid = ? LIMIT 1")) {
+            s.setString(1, shopId.toString());
+            try (ResultSet r = s.executeQuery()) {
+                if (!r.next()) throw new IllegalArgumentException("That Garden shop does not exist.");
+                UUID owner = UUID.fromString(r.getString("owner_uuid"));
+                if (!owner.equals(actor.getUniqueId()) && !actor.hasPermission("gardentrade.business.admin")) {
+                    throw new IllegalArgumentException("You can only attach a shop you own to your workplace.");
+                }
+            }
+        }
+        try (Connection c = platform.storage().connection()) {
+            String existing = null;
+            try (PreparedStatement q = c.prepareStatement(
+                    "SELECT workplace_uuid FROM gt_shop_workplaces WHERE shop_uuid = ?")) {
+                q.setString(1, shopId.toString());
+                try (ResultSet r = q.executeQuery()) {
+                    if (r.next()) existing = r.getString("workplace_uuid");
+                }
+            }
+            if (existing != null && !existing.equals(workplace.id().toString())) {
+                throw new IllegalArgumentException(
+                        "That shop is already attached to another workplace. Unbind it there first.");
+            }
+            if (existing == null) {
+                try (PreparedStatement i = c.prepareStatement(
+                        "INSERT INTO gt_shop_workplaces (shop_uuid, workplace_uuid) VALUES (?, ?)")) {
+                    i.setString(1, shopId.toString());
+                    i.setString(2, workplace.id().toString());
+                    i.executeUpdate();
+                }
+            }
+        }
+    }
+
+    public Optional<String> transactionBlockReason(UUID shopId) throws SQLException {
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement(
+                     "SELECT w.* FROM gt_shop_workplaces x "
+                             + "JOIN gt_workplaces w ON w.workplace_uuid = x.workplace_uuid "
+                             + "WHERE x.shop_uuid = ? LIMIT 1")) {
+            s.setString(1, shopId.toString());
+            try (ResultSet r = s.executeQuery()) {
+                if (!r.next()) return Optional.empty();
+                Workplace workplace = readWorkplace(r);
+                return isOpen(workplace)
+                        ? Optional.empty()
+                        : Optional.of("This workplace is currently closed.");
+            }
+        }
     }
 
     public boolean handleDoor(Player player, Block block) throws SQLException {
-        Workplace workplace = workplaceForBlock("gt_workplace_doors", block).orElse(null);
+        Workplace workplace = workplaceForDoor(block).orElse(null);
         return workplace != null && !isOpen(workplace) && !isStaff(player.getUniqueId(), workplace.businessId());
+    }
+
+    public boolean blockRedstone(Block block) throws SQLException {
+        Workplace workplace = workplaceForDoor(block).orElse(null);
+        if (workplace == null || isOpen(workplace)) return false;
+        closeDoor(block);
+        return true;
+    }
+
+    public void closeClosedDoors() {
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement(
+                     "SELECT d.world_uuid,d.x,d.y,d.z,w.* FROM gt_workplace_doors d "
+                             + "JOIN gt_workplaces w ON w.workplace_uuid=d.workplace_uuid");
+             ResultSet r = s.executeQuery()) {
+            while (r.next()) {
+                Workplace workplace = readWorkplace(r);
+                if (isOpen(workplace)) continue;
+                var world = Bukkit.getWorld(UUID.fromString(r.getString("world_uuid")));
+                if (world == null) continue;
+                closeDoor(world.getBlockAt(r.getInt("x"), r.getInt("y"), r.getInt("z")));
+            }
+        } catch (SQLException ignored) {
+        }
     }
 
     public boolean isOpen(Workplace workplace) {
@@ -272,18 +370,87 @@ public final class BusinessService implements BusinessDirectory {
             try(ResultSet r=s.executeQuery()){return r.next()?Optional.of(readWorkplace(r)):Optional.empty();}
         }
     }
-    private void bindBlock(String table,UUID workplaceId,Block block) throws SQLException {
-        try(Connection c=platform.storage().connection()){
+    private void bindBlocks(String table, UUID workplaceId, List<Block> blocks) throws SQLException {
+        try (Connection c = platform.storage().connection()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement d=c.prepareStatement("DELETE FROM "+table+" WHERE world_uuid=? AND x=? AND y=? AND z=?")){
-                    d.setString(1,block.getWorld().getUID().toString());d.setInt(2,block.getX());d.setInt(3,block.getY());d.setInt(4,block.getZ());d.executeUpdate();
+                for (Block block : blocks) {
+                    try (PreparedStatement q = c.prepareStatement(
+                            "SELECT workplace_uuid FROM " + table + " WHERE world_uuid=? AND x=? AND y=? AND z=?")) {
+                        q.setString(1, block.getWorld().getUID().toString());
+                        q.setInt(2, block.getX());
+                        q.setInt(3, block.getY());
+                        q.setInt(4, block.getZ());
+                        try (ResultSet r = q.executeQuery()) {
+                            if (r.next() && !workplaceId.toString().equals(r.getString("workplace_uuid"))) {
+                                throw new IllegalArgumentException(
+                                        "That block is already linked to another workplace.");
+                            }
+                        }
+                    }
                 }
-                try(PreparedStatement s=c.prepareStatement("INSERT INTO "+table+" (world_uuid,x,y,z,workplace_uuid) VALUES (?,?,?,?,?)")){
-                    s.setString(1,block.getWorld().getUID().toString());s.setInt(2,block.getX());s.setInt(3,block.getY());s.setInt(4,block.getZ());s.setString(5,workplaceId.toString());s.executeUpdate();
+                for (Block block : blocks) {
+                    try (PreparedStatement d = c.prepareStatement(
+                            "DELETE FROM " + table + " WHERE world_uuid=? AND x=? AND y=? AND z=?")) {
+                        d.setString(1, block.getWorld().getUID().toString());
+                        d.setInt(2, block.getX());
+                        d.setInt(3, block.getY());
+                        d.setInt(4, block.getZ());
+                        d.executeUpdate();
+                    }
+                    try (PreparedStatement s = c.prepareStatement(
+                            "INSERT INTO " + table + " (world_uuid,x,y,z,workplace_uuid) VALUES (?,?,?,?,?)")) {
+                        s.setString(1, block.getWorld().getUID().toString());
+                        s.setInt(2, block.getX());
+                        s.setInt(3, block.getY());
+                        s.setInt(4, block.getZ());
+                        s.setString(5, workplaceId.toString());
+                        s.executeUpdate();
+                    }
                 }
                 c.commit();
-            } catch(SQLException e){c.rollback();throw e;} finally {c.setAutoCommit(true);}
+            } catch (SQLException | RuntimeException e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
+    }
+
+    private void validateManagedBlock(Player actor, Block block) {
+        if (actor.hasPermission("gardentrade.business.admin")) return;
+        if (land == null || land.claimIdAt(block).isEmpty() || !land.canManage(actor, block)) {
+            throw new IllegalArgumentException(
+                    "You can only bind workplace doors and signs inside Garden land you manage.");
+        }
+    }
+
+    private List<Block> doorBlocks(Block block) {
+        if (!(block.getBlockData() instanceof Door door)) {
+            return List.of(block);
+        }
+        Block other = door.getHalf() == Bisected.Half.TOP
+                ? block.getRelative(0, -1, 0)
+                : block.getRelative(0, 1, 0);
+        return isDoor(other.getType()) ? List.of(block, other) : List.of(block);
+    }
+
+    private Optional<Workplace> workplaceForDoor(Block block) throws SQLException {
+        Optional<Workplace> direct = workplaceForBlock("gt_workplace_doors", block);
+        if (direct.isPresent() || !(block.getBlockData() instanceof Door door)) return direct;
+        Block other = door.getHalf() == Bisected.Half.TOP
+                ? block.getRelative(0, -1, 0)
+                : block.getRelative(0, 1, 0);
+        return workplaceForBlock("gt_workplace_doors", other);
+    }
+
+    private void closeDoor(Block block) {
+        for (Block part : doorBlocks(block)) {
+            if (part.getBlockData() instanceof Openable openable && openable.isOpen()) {
+                openable.setOpen(false);
+                part.setBlockData(openable, false);
+            }
         }
     }
     private void refreshSigns(UUID workplaceId) throws SQLException {
