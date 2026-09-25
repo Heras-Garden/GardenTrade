@@ -481,6 +481,37 @@ public final class BusinessService implements BusinessDirectory {
     }
 
     @Override
+    public Optional<BusinessDirectory.Assignment> assignment(UUID employeeId) throws SQLException {
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement(
+                     "SELECT b.business_uuid,b.name business_name,w.workplace_uuid,w.name workplace_name,"
+                             + "w.territory_claim_uuid,p.position_uuid,p.title,p.wage,p.audience,"
+                             + "p.shift_start_minute,p.shift_end_minute,p.work_world_uuid,p.work_x,p.work_y,p.work_z "
+                             + "FROM gt_positions p JOIN gt_workplaces w ON w.workplace_uuid=p.workplace_uuid "
+                             + "JOIN gt_businesses b ON b.business_uuid=w.business_uuid WHERE p.employee_uuid=? LIMIT 1")) {
+            s.setString(1, employeeId.toString());
+            try (ResultSet r = s.executeQuery()) {
+                if (!r.next()) return Optional.empty();
+                String territory=r.getString("territory_claim_uuid"), workWorld=r.getString("work_world_uuid");
+                return Optional.of(new BusinessDirectory.Assignment(
+                        UUID.fromString(r.getString("business_uuid")),r.getString("business_name"),
+                        UUID.fromString(r.getString("workplace_uuid")),r.getString("workplace_name"),
+                        territory==null?null:UUID.fromString(territory),
+                        UUID.fromString(r.getString("position_uuid")),r.getString("title"),r.getLong("wage"),
+                        r.getString("audience"),r.getInt("shift_start_minute"),r.getInt("shift_end_minute"),
+                        workWorld==null?null:UUID.fromString(workWorld),
+                        nullableInt(r,"work_x"),nullableInt(r,"work_y"),nullableInt(r,"work_z")));
+            }
+        }
+    }
+
+    @Override
+    public boolean workplaceOpen(UUID workplaceId) throws SQLException {
+        Workplace workplace = workplace(workplaceId).orElse(null);
+        return workplace != null && isOpen(workplace);
+    }
+
+    @Override
     public List<Vacancy> vacancies() throws SQLException {
         List<Vacancy> out = new ArrayList<>();
         try (Connection c = platform.storage().connection();
