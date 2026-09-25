@@ -6,6 +6,7 @@ import com.herasgarden.gardentrade.model.ShopRecord;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -180,10 +181,18 @@ public final class ShopSignListener implements Listener {
 
         try {
             Optional<ShopRecord> found = shops.shopAt(event.getClickedBlock());
-            if (found.isEmpty() || !found.get().signShop()) return;
+            if (found.isEmpty() && isGeneratedContainerShopSign(sign)) {
+                Block container = attachedSupport(event.getClickedBlock());
+                if (container != null && ShopBlockKey.supported(container)) {
+                    found = shops.shopAt(container);
+                }
+            }
+            if (found.isEmpty()) return;
+
+            ShopRecord shop = found.get();
+            if (!shop.signShop() && !isGeneratedContainerShopSign(sign)) return;
 
             event.setCancelled(true);
-            ShopRecord shop = found.get();
             Player player = event.getPlayer();
             if (event.getAction() == Action.LEFT_CLICK_BLOCK || shops.canManage(player, shop)) {
                 GardenMessages.send(player, describe(shop));
@@ -213,7 +222,14 @@ public final class ShopSignListener implements Listener {
 
         try {
             Optional<ShopRecord> found = shops.shopAt(event.getBlock());
-            if (found.isEmpty() || !found.get().signShop()) return;
+            if (found.isEmpty() && isGeneratedContainerShopSign(sign)) {
+                Block container = attachedSupport(event.getBlock());
+                if (container != null && ShopBlockKey.supported(container)) {
+                    found = shops.shopAt(container);
+                }
+            }
+            if (found.isEmpty()) return;
+            if (!found.get().signShop() && !isGeneratedContainerShopSign(sign)) return;
             if (!shops.canManage(event.getPlayer(), found.get())) {
                 event.setCancelled(true);
                 GardenMessages.send(event.getPlayer(), "You do not manage this shop.");
@@ -227,6 +243,19 @@ public final class ShopSignListener implements Listener {
             event.setCancelled(true);
             GardenMessages.send(event.getPlayer(), "That shop could not be removed right now.");
         }
+    }
+
+    private Block attachedSupport(Block signBlock) {
+        String material = signBlock.getType().name();
+        if (!material.contains("_WALL_") || !material.endsWith("_SIGN")
+                || !(signBlock.getBlockData() instanceof Directional directional)) {
+            return null;
+        }
+        return signBlock.getRelative(directional.getFacing().getOppositeFace());
+    }
+
+    private boolean isGeneratedContainerShopSign(Sign sign) {
+        return safe(sign.getLine(0)).equalsIgnoreCase("[GardenShop]");
     }
 
     private void finishPendingSign(Player player, Sign sign, Block block, PendingSign pending) {
