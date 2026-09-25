@@ -1,6 +1,7 @@
 package com.herasgarden.gardentrade;
 
 import com.herasgarden.gardencore.api.GardenPlatform;
+import com.herasgarden.gardencore.api.land.GardenTerritoryDirectory;
 import com.herasgarden.gardentrade.api.BusinessDirectory;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -22,9 +23,11 @@ import java.util.UUID;
 public final class BusinessService implements BusinessDirectory {
     private static final ZoneId ZONE = ZoneId.of("America/New_York");
     private final GardenPlatform platform;
+    private final GardenTerritoryDirectory territories;
 
-    public BusinessService(GardenPlatform platform) {
+    public BusinessService(GardenPlatform platform, GardenTerritoryDirectory territories) {
         this.platform = platform;
+        this.territories = territories;
     }
 
     public Business createBusiness(Player owner, String name) throws SQLException {
@@ -44,7 +47,7 @@ public final class BusinessService implements BusinessDirectory {
         Business business = requireOwnedBusiness(actor, businessName);
         String clean = cleanName(name, 64, "Workplace name");
         if (workplaceByName(business.id(), clean).isPresent()) throw new IllegalArgumentException("That business already has a workplace with that name.");
-        Workplace workplace = new Workplace(UUID.randomUUID(), business.id(), clean, 540, 1020);
+        Workplace workplace = new Workplace(UUID.randomUUID(), business.id(), clean, null, 540, 1020);
         try (Connection c = platform.storage().connection();
              PreparedStatement s = c.prepareStatement("INSERT INTO gt_workplaces (workplace_uuid, business_uuid, name, open_minute, close_minute, created_at) VALUES (?, ?, ?, ?, ?, ?)")) {
             s.setString(1, workplace.id().toString()); s.setString(2, business.id().toString());
@@ -63,7 +66,27 @@ public final class BusinessService implements BusinessDirectory {
             s.setInt(1, openMinute); s.setInt(2, closeMinute); s.setString(3, workplace.id().toString()); s.executeUpdate();
         }
         refreshSigns(workplace.id());
-        return new Workplace(workplace.id(), workplace.businessId(), workplace.name(), openMinute, closeMinute);
+        return new Workplace(workplace.id(), workplace.businessId(), workplace.name(), workplace.territoryClaimId(), openMinute, closeMinute);
+    }
+
+    public Workplace setTerritory(Player actor, String businessName, String workplaceName, String territoryName)
+            throws SQLException {
+        Business business = requireOwnedBusiness(actor, businessName);
+        Workplace workplace = requireWorkplace(business.id(), workplaceName);
+        UUID territoryClaimId = territories.findByName(territoryName)
+                .orElseThrow(() -> new IllegalArgumentException("That territory does not exist."))
+                .claimId();
+        if (!territories.canManage(actor, territoryClaimId) && !actor.hasPermission("gardentrade.business.admin")) {
+            throw new IllegalArgumentException("You must manage that territory to bind a workplace to it.");
+        }
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement("UPDATE gt_workplaces SET territory_claim_uuid = ? WHERE workplace_uuid = ?")) {
+            s.setString(1, territoryClaimId.toString());
+            s.setString(2, workplace.id().toString());
+            s.executeUpdate();
+        }
+        return new Workplace(workplace.id(), workplace.businessId(), workplace.name(), territoryClaimId,
+                workplace.openMinute(), workplace.closeMinute());
     }
 
     public Position createPosition(Player actor, String businessName, String workplaceName, String title, long wage) throws SQLException {
@@ -94,6 +117,18 @@ public final class BusinessService implements BusinessDirectory {
             s.setString(1, employeeId.toString());
             s.setString(2, employeeName == null ? employeeId.toString().substring(0, 8) : employeeName);
             s.setLong(3, System.currentTimeMillis()); s.setString(4, positionId.toString());
+            return s.executeUpdate() == 1;
+        }
+    }
+
+    @Override
+    public boolean vacate(UUID positionId, UUID employeeId) throws SQLException {
+        try (Connection c = platform.storage().connection();
+             PreparedStatement s = c.prepareStatement(
+                     "UPDATE gt_positions SET employee_uuid = NULL, employee_name = NULL, hired_at = NULL "
+                             + "WHERE position_uuid = ? AND employee_uuid = ?")) {
+            s.setString(1, positionId.toString());
+            s.setString(2, employeeId.toString());
             return s.executeUpdate() == 1;
         }
     }
@@ -170,9 +205,15 @@ public final class BusinessService implements BusinessDirectory {
     public List<Vacancy> vacancies() throws SQLException {
         List<Vacancy> out = new ArrayList<>();
         try (Connection c = platform.storage().connection();
-             PreparedStatement s = c.prepareStatement("SELECT b.business_uuid, b.name business_name, w.workplace_uuid, w.name workplace_name, p.position_uuid, p.title, p.wage FROM gt_positions p JOIN gt_workplaces w ON w.workplace_uuid=p.workplace_uuid JOIN gt_businesses b ON b.business_uuid=w.business_uuid WHERE p.employee_uuid IS NULL ORDER BY b.name,w.name,p.title");
+             PreparedStatement s = c.prepareStatement("SELECT b.business_uuid, b.name business_name, w.workplace_uuid, w.name workplace_name, w.territory_claim_uuid, p.position_uuid, p.title, p.wage FROM gt_positions p JOIN gt_workplaces w ON w.workplace_uuid=p.workplace_uuid JOIN gt_businesses b ON b.business_uuid=w.business_uuid WHERE p.employee_uuid IS NULL ORDER BY b.name,w.name,p.title");
              ResultSet r = s.executeQuery()) {
-            while (r.next()) out.add(new Vacancy(UUID.fromString(r.getString("business_uuid")), r.getString("business_name"), UUID.fromString(r.getString("workplace_uuid")), r.getString("workplace_name"), UUID.fromString(r.getString("position_uuid")), r.getString("title"), r.getLong("wage")));
+            while (r.next()) {
+                String territory = r.getString("territory_claim_uuid");
+                out.add(new Vacancy(UUID.fromString(r.getString("business_uuid")), r.getString("business_name"),
+                        UUID.fromString(r.getString("workplace_uuid")), r.getString("workplace_name"),
+                        territory == null ? null : UUID.fromString(territory),
+                        UUID.fromString(r.getString("position_uuid")), r.getString("title"), r.getLong("wage")));
+            }
         }
         return List.copyOf(out);
     }
@@ -264,9 +305,9 @@ public final class BusinessService implements BusinessDirectory {
     private String cleanName(String raw,int max,String label){String c=raw==null?"":raw.trim().replaceAll("\\s+"," ");if(c.isBlank())throw new IllegalArgumentException(label+" is required.");return c.length()<=max?c:c.substring(0,max);}
     private boolean isDoor(Material t){String n=t.name();return n.endsWith("_DOOR")||n.endsWith("_TRAPDOOR");}
     private Business readBusiness(ResultSet r)throws SQLException{return new Business(UUID.fromString(r.getString("business_uuid")),r.getString("name"),UUID.fromString(r.getString("owner_uuid")),r.getString("owner_name"));}
-    private Workplace readWorkplace(ResultSet r)throws SQLException{return new Workplace(UUID.fromString(r.getString("workplace_uuid")),UUID.fromString(r.getString("business_uuid")),r.getString("name"),r.getInt("open_minute"),r.getInt("close_minute"));}
+    private Workplace readWorkplace(ResultSet r)throws SQLException{String t=r.getString("territory_claim_uuid");return new Workplace(UUID.fromString(r.getString("workplace_uuid")),UUID.fromString(r.getString("business_uuid")),r.getString("name"),t==null?null:UUID.fromString(t),r.getInt("open_minute"),r.getInt("close_minute"));}
     private Position readPosition(ResultSet r)throws SQLException{String e=r.getString("employee_uuid");return new Position(UUID.fromString(r.getString("position_uuid")),UUID.fromString(r.getString("workplace_uuid")),r.getString("title"),r.getLong("wage"),e==null?null:UUID.fromString(e),r.getString("employee_name"));}
     public record Business(UUID id,String name,UUID ownerId,String ownerName){}
-    public record Workplace(UUID id,UUID businessId,String name,int openMinute,int closeMinute){}
+    public record Workplace(UUID id,UUID businessId,String name,UUID territoryClaimId,int openMinute,int closeMinute){}
     public record Position(UUID id,UUID workplaceId,String title,long wage,UUID employeeId,String employeeName){}
 }
